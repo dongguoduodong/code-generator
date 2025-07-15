@@ -1,4 +1,4 @@
-预览地址：https://ai-code-generator-six.vercel.app/
+预览地址：https://code-generator-red.vercel.app/
 
 ## Getting Started
 
