@@ -4,6 +4,7 @@ import { getProjectById } from "@/lib/db/project";
 import { getMessagesForProject } from "@/lib/db/message";
 import { getFilesForProject } from "@/lib/db/file";
 import ProjectClientPage from "./page.client";
+import { WorkspaceStoreProvider } from "@/stores/WorkspaceStoreProvider";
 
 interface ProjectPageProps {
   params: Promise<{ project_id: string }>;
@@ -55,12 +56,23 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
   );
   const isFirstLoad = !hasAssistantMessage;
   return (
-    <ProjectClientPage
-      project={project}
-      initialMessages={messages || []}
-      initialFiles={files || []}
-      isFirstLoad={isFirstLoad}
-      initialGitignoreContent={initialGitignoreContent}
-    />
+    <WorkspaceStoreProvider>
+      <ProjectClientPage
+        project={project}
+        initialMessages={
+          (messages || []).map((msg) =>
+            msg.role === "tool"
+              ? { ...msg, role: "system" }
+              : { ...msg, role: msg.role }
+          )
+        }
+        initialFiles={(files || []).map((file) => ({
+          ...file,
+          content: file.content ?? "",
+        }))}
+        isFirstLoad={isFirstLoad}
+        initialGitignoreContent={initialGitignoreContent}
+      />
+    </WorkspaceStoreProvider>
   );
 }

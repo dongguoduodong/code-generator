@@ -1,22 +1,8 @@
 import { FileTreeNode } from "@/types/webcontainer";
 import { ProjectFile } from "@/types/database";
 import { WebContainer } from "@webcontainer/api";
-import path from "path";
 import { Ignore } from "ignore";
 
-export const findNode = (
-  nodes: FileTreeNode[],
-  path: string
-): FileTreeNode | null => {
-  for (const node of nodes) {
-    if (node.path === path) return node;
-    if (node.type === "directory" && node.children) {
-      const found = findNode(node.children, path);
-      if (found) return found;
-    }
-  }
-  return null;
-};
 
 export const createFile = (
   nodes: FileTreeNode[],
@@ -92,9 +78,6 @@ export const updateFileContent = (
   return updatedNodes;
 };
 
-/**
- * [已修复] 删除文件或目录。
- */
 export const deleteFileOrDirectory = (
   nodes: FileTreeNode[],
   path: string
@@ -112,13 +95,6 @@ export const deleteFileOrDirectory = (
   });
 };
 
-/**
- * [已修复] 将从数据库获取的扁平文件列表转换为树状结构。
- * 这个函数现在也使用新的、可靠的createFile逻辑。
- *
- * @param initialFiles - 从数据库来的文件列表。
- * @returns FileTreeNode[]
- */
 export const convertInitialFilesToFileSystem = (
   initialFiles: ProjectFile[]
 ): FileTreeNode[] => {
@@ -133,76 +109,6 @@ export const convertInitialFilesToFileSystem = (
 
   return fileSystem;
 };
-
-function globToRegex(glob: string): RegExp {
-  const pattern = glob
-    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, ".*")
-    .replace(/\*/g, "[^/]*");
-  return new RegExp(`^${pattern}(/.*)?$`);
-}
-
-async function recursiveListFiles(
-  wc: WebContainer,
-  dir: string
-): Promise<string[]> {
-  const entries = await wc.fs.readdir(dir, { withFileTypes: true });
-  let fileList: string[] = [];
-
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      fileList = fileList.concat(await recursiveListFiles(wc, fullPath));
-    } else {
-      fileList.push(fullPath);
-    }
-  }
-  return fileList;
-}
-
-/**
- * Reads the .gitignore file and returns an array of regex patterns.
- * @param wc The WebContainer instance.
- * @returns A promise that resolves to an array of RegExp.
- */
-async function getIgnoreRules(wc: WebContainer): Promise<RegExp[]> {
-  const defaultIgnores = [
-    "node_modules",
-    "dist",
-    "build",
-    "package-lock.json",
-    ".DS_Store",
-    "*.log",
-    ".env",
-  ];
-  try {
-    const gitignoreContent = await wc.fs.readFile("/.gitignore", "utf-8");
-    const customRules = gitignoreContent
-      .split("\n")
-      .filter((line) => line.trim() !== "" && !line.startsWith("#"));
-    return [...defaultIgnores, ...customRules].map(globToRegex);
-  } catch {
-    return defaultIgnores.map(globToRegex);
-  }
-}
-
-export async function getFilteredFileSystemState(
-  wc: WebContainer | null
-): Promise<Set<string>> {
-  if (!wc) return new Set();
-
-  const rules = await getIgnoreRules(wc);
-  const allFiles = await recursiveListFiles(wc, "/");
-
-  const filtered = allFiles.filter((filePath) => {
-    const normalizedPath = filePath.startsWith("/")
-      ? filePath.substring(1)
-      : filePath;
-    return !rules.some((rule) => rule.test(normalizedPath));
-  });
-
-  return new Set(filtered);
-}
 
 export function computeDiff(beforeState: Set<string>, afterState: Set<string>) {
   const createdFiles = [...afterState].filter((file) => !beforeState.has(file));
@@ -224,10 +130,9 @@ async function _readDirRecursive(
     const fullPath = path === "/" ? entry.name : `${path}/${entry.name}`;
     allPaths.push(fullPath);
 
-    // 3. 如果是目录，则进行递归调用
+    // 如果是目录，则进行递归调用
     if (entry.isDirectory()) {
       const subPaths = await _readDirRecursive(fullPath, fs);
-      // 将子目录的结果合并到总列表中
       allPaths.push(...subPaths);
     }
   }

@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import AssistantMessageRenderer from "./AssistantMessageRenderer";
-import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useWorkspaceStore } from "@/stores/WorkspaceStoreProvider";
 import type { UseChatHelpers } from "@ai-sdk/react";
 import type { Project } from "@/types/database";
 import { findLastIndex } from "lodash-es";
@@ -24,7 +24,10 @@ export default function ChatPanel({ chatHook, project }: ChatPanelProps) {
 
   const aiStatus = useWorkspaceStore((state) => state.aiStatus);
   const { operationStatuses, isProcessing: isProcessingQueue } =
-    useWorkspaceStore();
+    useWorkspaceStore((state) => ({
+      operationStatuses: state.operationStatuses,
+      isProcessing: state.isProcessing,
+    }));
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HardDrive, Code as CodeIcon, Play } from "lucide-react";
 import PreviewPanel from "./PreviewPanel";
-import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useWorkspaceStore } from "@/stores/WorkspaceStoreProvider";
 import { cn } from "@/lib/utils";
 
 const CodePanel = dynamic(
@@ -12,7 +12,11 @@ const CodePanel = dynamic(
   { ssr: false }
 );
 
-export default function WorkspacePanel() {
+export default function WorkspacePanel({
+  onFixDevError,
+}: {
+  onFixDevError: (errorLog: string) => void;
+}) {
   const isLoadingContainer = useWorkspaceStore(
     (state) => state.isLoadingContainer
   );
@@ -63,7 +67,7 @@ export default function WorkspacePanel() {
               </div>
             </div>
           ) : (
-            <CodePanel />
+            <CodePanel onFixDevError={onFixDevError} />
           )}
         </TabsContent>
         <TabsContent

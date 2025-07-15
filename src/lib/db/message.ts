@@ -42,6 +42,7 @@ async function verifyMessageOwnership(
   return data;
 }
 
+
 export async function getMessagesForProject(
   supabase: SupabaseClient,
   projectId: string

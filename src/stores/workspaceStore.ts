@@ -1,38 +1,54 @@
-import { create } from "zustand";
+"use client";
 import type { WebContainer } from "@webcontainer/api";
 import type { Terminal } from "xterm";
 import type { Ignore } from "ignore";
-import { FileTreeNode } from "@/types/webcontainer";
-import { OperationStatusType, RenderNode, FileOperation } from "@/types/ai";
+import { toast } from "sonner";
+import stripAnsi from "strip-ansi";
+
+import type { FileTreeNode } from "@/types/webcontainer";
+import type {
+  OperationStatusType,
+  RenderNode,
+  FileOperation,
+} from "@/types/ai";
+import { apiClient } from "@/lib/apiClient";
 import {
   createFile,
   updateFileContent,
   deleteFileOrDirectory,
 } from "@/app/projects/[project_id]/utils/fileSystem";
-import { toast } from "sonner";
-import { apiClient } from "@/lib/apiClient";
 import { executeFileInstruction } from "@/app/projects/[project_id]/hooks/useFileExecutor";
-import { executeTerminalInstruction } from "@/app/projects/[project_id]/utils/terminal";
+import { handleProcess } from "@/app/projects/[project_id]/utils/processHandler";
+import { create } from "zustand";
 
-const saveOperationsToDb = async (
-  projectId: string,
-  operations: FileOperation[]
-) => {
-  if (!operations.length || !projectId) return;
-  try {
-    await apiClient(`/api/projects/${projectId}/files`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operations, projectId }),
-    });
-  } catch (e) {
-    console.error("Failed to save operations to DB:", e);
-    toast.error("同步文件到数据库失败。");
-    throw e;
-  }
-};
+export interface DevError {
+  id: string;
+  log: string;
+  timestamp: number;
+  status: "active" | "dismissed";
+}
 
-interface WorkspaceActions {
+export interface WorkspaceState {
+  webcontainer: WebContainer | null;
+  terminal: Terminal | null;
+  gitignoreParser: Ignore | null;
+  executionError: string | null;
+  fileSystem: FileTreeNode[];
+  activeFile: string | null;
+  editorContent: string;
+  previewUrl: string;
+  isLoadingContainer: boolean;
+  aiStatus: string;
+  instructionQueue: { instruction: RenderNode; projectId: string }[];
+  operationStatuses: Record<string, OperationStatusType>;
+  isProcessing: boolean;
+  initialAiCallFired: boolean;
+  currentProjectId: string | null;
+  devErrors: DevError[];
+  actions: WorkspaceActions;
+}
+
+export interface WorkspaceActions {
   setWebcontainer: (
     instance: WebContainer | null,
     projectId: string | null
@@ -53,28 +69,33 @@ interface WorkspaceActions {
   resetOperationStatuses: () => void;
   resetWorkspace: () => void;
   setInitialAiCallFired: () => void;
+  addDevError: (log: string) => void;
+  dismissDevError: (errorId: string) => void;
+  clearAllDevErrors: () => void;
+  runCommand: (command: string, args: string[]) => Promise<void>;
+  runBackgroundTask: (command: string, args: string[]) => void;
+  startInteractiveShell: () => void;
 }
 
-interface WorkspaceState {
-  webcontainer: WebContainer | null;
-  terminal: Terminal | null;
-  gitignoreParser: Ignore | null;
-  executionError: string | null;
-  fileSystem: FileTreeNode[];
-  activeFile: string | null;
-  editorContent: string;
-  previewUrl: string;
-  isLoadingContainer: boolean;
-  aiStatus: string;
-  instructionQueue: { instruction: RenderNode; projectId: string }[];
-  operationStatuses: Record<string, OperationStatusType>;
-  isProcessing: boolean;
-  initialAiCallFired: boolean;
-  currentProjectId: string | null;
-  actions: WorkspaceActions;
-}
+const saveOperationsToDb = async (
+  projectId: string,
+  operations: FileOperation[]
+) => {
+  if (!operations.length || !projectId) return;
+  try {
+    await apiClient(`/api/projects/${projectId}/files`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operations, projectId }),
+    });
+  } catch (e) {
+    console.error("Failed to save operations to DB:", e);
+    toast.error("同步文件到数据库失败。");
+    throw e;
+  }
+};
 
-const getInitialState = (): Omit<WorkspaceState, "actions"> => ({
+const initialState: Omit<WorkspaceState, "actions"> = {
   webcontainer: null,
   terminal: null,
   gitignoreParser: null,
@@ -90,172 +111,239 @@ const getInitialState = (): Omit<WorkspaceState, "actions"> => ({
   isProcessing: false,
   initialAiCallFired: false,
   currentProjectId: null,
-});
+  devErrors: [],
+};
 
-export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
-  const processQueue = async () => {
-    const { isProcessing, instructionQueue, webcontainer, terminal, actions } =
-      get();
+export const createWorkspaceStore = () => {
+  return create<WorkspaceState>()((set, get) => {
 
-    if (
-      isProcessing ||
-      instructionQueue.length === 0 ||
-      !webcontainer ||
-      !terminal
-    ) {
-      return;
-    }
+    const runCommandAsync = async (
+      command: string,
+      args: string[]
+    ): Promise<void> => {
+      const { webcontainer, terminal } = get();
+      if (!webcontainer || !terminal)
+        throw new Error("环境未就绪，无法执行命令。");
 
-    set({ isProcessing: true });
+      const fullCommand = `${command} ${args.join(" ")}`;
+      terminal.write(`\r\n\x1b[1;32m$ \x1b[0m${fullCommand}\r\n`);
+      const process = await webcontainer.spawn(command, args);
+      const { exitCode, output } = await handleProcess(process, { terminal });
 
-    while (get().instructionQueue.length > 0) {
-      const { instruction, projectId } = get().instructionQueue[0];
-
-      try {
-        actions.updateOperationStatus(instruction.id, "executing");
-        actions.setAiStatus(
-          `正在执行: ${
-            instruction.type === "file"
-              ? `${instruction.action} ${instruction.path}`
-              : instruction.type === "terminal"
-              ? instruction.command
-              : ""
-          }`
+      if (exitCode !== 0) {
+        throw new Error(
+          `命令失败，退出码 ${exitCode}.\n输出:\n${stripAnsi(output)}`
         );
+      }
+    };
 
-        let result;
-        if (instruction.type === "file") {
-          result = await executeFileInstruction(instruction, {
-            webcontainer,
-            projectId,
-            saveOperationsToDb,
-          });
-        } else if (instruction.type === "terminal") {
-          if (instruction.background) {
-            terminal.write(
-              `\r\n\x1b[1;36m$ (bg) \x1b[0m${instruction.command}\r\n`
-            );
+    const runBackgroundTaskAsync = async (command: string, args: string[]) => {
+      const { webcontainer, terminal, actions } = get();
+      if (!webcontainer || !terminal) {
+        toast.error("环境未就绪，无法执行后台任务。");
+        return;
+      }
+
+      const process = await webcontainer.spawn(command, args);
+      handleProcess(process, {
+        terminal,
+        errorCheck: {
+          regex: /error|failed|exception|unhandled|could not be resolved/i,
+          onDetection: (cleanedLog) => actions.addDevError(cleanedLog),
+        },
+      }).then(({ exitCode }) => {
+        terminal.write(
+          `\r\n\x1b[1;33m后台进程已退出，退出码: ${exitCode}\x1b[0m\r\n`
+        );
+      });
+    };
+
+    const startInteractiveShellAsync = async (): Promise<void> => {
+      const { webcontainer, terminal } = get();
+      if (!webcontainer || !terminal) return;
+
+      const shellProcess = await webcontainer.spawn("jsh", {
+        terminal: { cols: terminal.cols, rows: terminal.rows },
+      });
+      shellProcess.output.pipeTo(
+        new WritableStream({ write: (data) => terminal.write(data) })
+      );
+      const writer = shellProcess.input.getWriter();
+      terminal.onData((data) => writer.write(data));
+    };
+
+    const processQueue = async () => {
+      const { isProcessing, instructionQueue, webcontainer, terminal } = get();
+      if (
+        isProcessing ||
+        instructionQueue.length === 0 ||
+        !webcontainer ||
+        !terminal
+      )
+        return;
+
+      set({ isProcessing: true });
+
+      while (get().instructionQueue.length > 0) {
+        const { instruction, projectId } = get().instructionQueue[0];
+        try {
+          get().actions.updateOperationStatus(instruction.id, "executing");
+          get().actions.setAiStatus(
+            `正在执行: ${
+              instruction.type === "file"
+                ? `${instruction.action} ${instruction.path}`
+                : instruction.type === "terminal"
+                  ? instruction.command
+                  : ""
+            }`
+          );
+
+          let result: { success: boolean; error?: string } = { success: true };
+          if (instruction.type === "file") {
+            result = await executeFileInstruction(instruction, {
+              webcontainer,
+              projectId,
+              saveOperationsToDb,
+            });
+          } else if (instruction.type === "terminal") {
             const [cmd, ...args] = instruction.command
               .split(/\s+/)
               .filter(Boolean);
-            const process = await webcontainer.spawn(cmd, args);
-            process.output.pipeTo(
-              new WritableStream({
-                write(data) {
-                  terminal.write(data);
-                },
-              })
-            );
-            process.exit.then((exitCode) => {
-              terminal.write(
-                `\r\n\x1b[1;33mBackground process exited with code ${exitCode}\x1b[0m\r\n`
-              );
-            });
-            result = { success: true };
+            if (instruction.background) {
+              get().actions.runBackgroundTask(cmd, args);
+            } else {
+              await get().actions.runCommand(cmd, args);
+            }
+          }
+
+          if (result.success) {
+            if (instruction.type === "file") {
+              const { path, action, content } = instruction;
+              switch (action) {
+                case "create":
+                  get().actions.createFileNode(path, content);
+                  break;
+                case "update":
+                  get().actions.updateFileNodeContent(path, content);
+                  break;
+                case "delete":
+                  get().actions.deleteFileNode(path);
+                  break;
+              }
+              if (action !== "delete")
+                get().actions.setActiveFile(path, content);
+              else if (get().activeFile === path)
+                get().actions.setActiveFile(null, "");
+            }
+            get().actions.updateOperationStatus(instruction.id, "completed");
           } else {
-            result = await executeTerminalInstruction(instruction, {
-              webcontainer,
-              terminal,
-            });
+            throw new Error(result.error || "未知执行错误");
           }
-        } else {
-          result = { success: true };
+        } catch (e: unknown) {
+          const error = e instanceof Error ? e.message : String(e);
+          get().actions.updateOperationStatus(instruction.id, "error");
+          get().actions.setExecutionError(error);
+          toast.error(`指令执行失败`, { description: error });
+        } finally {
+          set((state) => ({
+            instructionQueue: state.instructionQueue.slice(1),
+          }));
         }
-
-        if (result.success) {
-          if (instruction.type === "file") {
-            const { path, action, content } = instruction;
-            switch (action) {
-              case "create":
-                actions.createFileNode(path, content);
-                break;
-              case "update":
-                actions.updateFileNodeContent(path, content);
-                break;
-              case "delete":
-                actions.deleteFileNode(path);
-                break;
-            }
-            if (action !== "delete") {
-              actions.setActiveFile(path, content);
-            } else if (get().activeFile === path) {
-              actions.setActiveFile(null, "");
-            }
-          }
-          actions.updateOperationStatus(instruction.id, "completed");
-        } else {
-          throw new Error(result.error || "未知执行错误");
-        }
-      } catch (e: unknown) {
-        const error = e instanceof Error ? e.message : String(e);
-        actions.updateOperationStatus(instruction.id, "error");
-        actions.setExecutionError(error);
-        toast.error(`指令执行失败`, { description: error });
-      } finally {
-        set((state) => ({ instructionQueue: state.instructionQueue.slice(1) }));
       }
-    }
 
-    set({ isProcessing: false, aiStatus: "AI 已完成所有任务，正在待命..." });
-  };
+      get().actions.clearAllDevErrors();
+      set({ isProcessing: false, aiStatus: "AI 已完成所有任务，正在待命..." });
+    };
 
-  return {
-    ...getInitialState(),
-    actions: {
-      setWebcontainer: (instance, projectId) => {
-        set({
-          webcontainer: instance,
-          isLoadingContainer: !instance,
-          currentProjectId: instance ? projectId : null,
-        });
-      },
-      setTerminal: (instance) => set({ terminal: instance }),
-      setGitignoreParser: (parser) => set({ gitignoreParser: parser }),
-      setExecutionError: (error) => set({ executionError: error }),
-      setFileSystem: (fs) => set({ fileSystem: fs }),
-      setActiveFile: (path, content) =>
-        set({
-          activeFile: path,
-          editorContent: content ?? get().editorContent,
-        }),
-      setEditorContent: (content) => set({ editorContent: content }),
-      setPreviewUrl: (url) => set({ previewUrl: url }),
-      setAiStatus: (status) => set({ aiStatus: status }),
-      createFileNode: (path, content) =>
-        set((state) => ({
-          fileSystem: createFile(state.fileSystem, path, content),
-        })),
-      updateFileNodeContent: (path, content) =>
-        set((state) => ({
-          fileSystem: updateFileContent(state.fileSystem, path, content),
-        })),
-      deleteFileNode: (path) =>
-        set((state) => ({
-          fileSystem: deleteFileOrDirectory(state.fileSystem, path),
-        })),
-      resetOperationStatuses: () => set({ operationStatuses: {} }),
-      resetWorkspace: () => {
-        const wc = get().webcontainer;
-        wc?.teardown();
-        set(getInitialState());
-      },
-      updateOperationStatus: (id, status) =>
-        set((state) => ({
-          operationStatuses: { ...state.operationStatuses, [id]: status },
-        })),
-      setInitialAiCallFired: () => set({ initialAiCallFired: true }),
-      enqueueInstructions: (nodes, projectId) => {
-        const newQueueItems = nodes.map((instruction) => ({
-          instruction,
-          projectId,
-        }));
-        set((state) => ({
-          instructionQueue: [...state.instructionQueue, ...newQueueItems],
-        }));
+    // --- 返回最终的 Store 对象 ---
 
-        // 延迟调用，确保状态更新后再执行
-        setTimeout(processQueue, 0);
+    return {
+      ...initialState,
+      actions: {
+        setWebcontainer: (instance, projectId) =>
+          set({
+            webcontainer: instance,
+            isLoadingContainer: !instance,
+            currentProjectId: instance ? projectId : null,
+          }),
+        setTerminal: (instance) => set({ terminal: instance }),
+        setGitignoreParser: (parser) => set({ gitignoreParser: parser }),
+        setExecutionError: (error) => set({ executionError: error }),
+        setFileSystem: (fs) => set({ fileSystem: fs }),
+        setActiveFile: (path, content) =>
+          set({
+            activeFile: path,
+            editorContent: content ?? get().editorContent,
+          }),
+        setEditorContent: (content) => set({ editorContent: content }),
+        setPreviewUrl: (url) => set({ previewUrl: url }),
+        setAiStatus: (status) => set({ aiStatus: status }),
+        createFileNode: (path, content) =>
+          set((state) => ({
+            fileSystem: createFile(state.fileSystem, path, content),
+          })),
+        updateFileNodeContent: (path, content) =>
+          set((state) => ({
+            fileSystem: updateFileContent(state.fileSystem, path, content),
+          })),
+        deleteFileNode: (path) =>
+          set((state) => ({
+            fileSystem: deleteFileOrDirectory(state.fileSystem, path),
+          })),
+        resetOperationStatuses: () => set({ operationStatuses: {} }),
+        resetWorkspace: () => {
+          get().webcontainer?.teardown();
+          set(initialState);
+        },
+        updateOperationStatus: (id, status) =>
+          set((state) => ({
+            operationStatuses: { ...state.operationStatuses, [id]: status },
+          })),
+        setInitialAiCallFired: () => set({ initialAiCallFired: true }),
+        enqueueInstructions: (nodes, projectId) => {
+          const newQueueItems = nodes.map((instruction) => ({
+            instruction,
+            projectId,
+          }));
+          set((state) => ({
+            instructionQueue: [...state.instructionQueue, ...newQueueItems],
+          }));
+          setTimeout(processQueue, 0);
+        },
+        addDevError: (log) => {
+          set((state) => {
+            const existingError = state.devErrors.find((e) => e.log === log);
+            if (existingError) {
+              return {
+                devErrors: state.devErrors.map((e) =>
+                  e.id === existingError.id ? { ...e, status: "active" } : e
+                ),
+              };
+            } else {
+              const newError: DevError = {
+                id: `err-${Date.now()}-${Math.random()}`,
+                log,
+                timestamp: Date.now(),
+                status: "active",
+              };
+              return { devErrors: [...state.devErrors, newError] };
+            }
+          });
+        },
+        dismissDevError: (errorId) => {
+          set((state) => ({
+            devErrors: state.devErrors.map((e) =>
+              e.id === errorId ? { ...e, status: "dismissed" } : e
+            ),
+          }));
+        },
+        clearAllDevErrors: () => set({ devErrors: [] }),
+        runCommand: runCommandAsync,
+        runBackgroundTask: runBackgroundTaskAsync,
+        startInteractiveShell: startInteractiveShellAsync,
       },
-    },
-  };
-});
+    };
+  });
+};
+
+export type WorkspaceStore = ReturnType<typeof createWorkspaceStore>;

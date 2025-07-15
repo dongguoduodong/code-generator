@@ -1,9 +1,16 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+"use client";
+
+interface UseProjectSetupProps {
+  props: ProjectClientPageProps;
+  chatHook: UseChatHelpers;
+}
+
+import { useEffect, useRef } from "react";
 import { useMount } from "ahooks";
-import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useWorkspaceStore } from "@/stores/WorkspaceStoreProvider";
 import { useWebContainer } from "./useWebContainer";
 import { convertInitialFilesToFileSystem } from "../utils/fileSystem";
-import { ProjectClientPageProps } from "@/types/ui";
+import { type ProjectClientPageProps } from "@/types/ui";
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { toast } from "sonner";
 
@@ -14,32 +21,17 @@ interface UseProjectSetupProps {
 
 export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
   const { initialFiles, isFirstLoad, project } = props;
-  const {
-    initialAiCallFired,
-    actions,
-    terminal,
-    currentProjectId: storeProjectId,
-  } = useWorkspaceStore();
-  const { setInitialAiCallFired } = actions;
-  const { setFileSystem, setAiStatus, setActiveFile, resetOperationStatuses } =
-    actions;
-  const { initWebContainer, writeFile, runCommand } = useWebContainer(
-    project.id
-  );
-  const hasHydrated = useRef(false);
-  const setupExecuted = useRef(false);
-  const webcontainer = useWorkspaceStore((s) => s.webcontainer);
 
-  useLayoutEffect(() => {
-    // 如果 store 中记录的 project ID 存在，且与当前页面的 project ID 不符
-    // 这就明确表示用户从另一个项目导航而来，必须重置工作区。
-    if (storeProjectId && storeProjectId !== project.id) {
-      console.warn(
-        `Project changed from ${storeProjectId} to ${project.id}. Resetting workspace.`
-      );
-      actions.resetWorkspace();
-    }
-  }, [project.id, storeProjectId, actions]);
+  const webcontainer = useWorkspaceStore((state) => state.webcontainer);
+  const terminal = useWorkspaceStore((state) => state.terminal);
+  const actions = useWorkspaceStore((state) => state.actions);
+  const initialAiCallFired = useWorkspaceStore(
+    (state) => state.initialAiCallFired
+  );
+
+  const { initWebContainer, writeFile } = useWebContainer(project.id);
+  const hasHydrated = useRef(false);
+  const setupFlowHasRun = useRef(false);
 
   useMount(async () => {
     await initWebContainer();
@@ -47,69 +39,67 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
 
   useEffect(() => {
     if (!webcontainer || hasHydrated.current) return;
+    hasHydrated.current = true;
 
     const hydrate = async () => {
-      hasHydrated.current = true;
-      setAiStatus("正在同步初始文件...");
+      actions.setAiStatus("正在同步初始文件...");
       const fileTree = convertInitialFilesToFileSystem(initialFiles);
-      setFileSystem(fileTree);
+      actions.setFileSystem(fileTree);
+
       if (initialFiles.length > 0) {
         await Promise.all(
           initialFiles.map((file) => writeFile(file.path, file.content))
         );
-
+        // 默认打开第一个文件
         const firstFile =
           initialFiles.find((f) => !f.path.includes("/")) || initialFiles[0];
         if (firstFile) {
-          setActiveFile(firstFile.path, firstFile.content);
+          actions.setActiveFile(firstFile.path, firstFile.content);
         }
-        console.log("✅ All initial files written to WebContainer.");
-      }
-      if (isFirstLoad && !initialAiCallFired) {
-        setInitialAiCallFired();
-
-        setAiStatus("正在初始化 AI 对话...");
-        resetOperationStatuses();
-        console.log("🚀 触发 AI 初始调用");
-        chatHook.reload();
-      } else if (!isFirstLoad) {
-        setAiStatus("项目就绪");
       }
     };
-
     hydrate();
-  }, [
-    webcontainer,
-    initialFiles,
-    isFirstLoad,
-    chatHook,
-    setFileSystem,
-    setActiveFile,
-    writeFile,
-    setAiStatus,
-    resetOperationStatuses,
-    runCommand,
-  ]);
+  }, [webcontainer, initialFiles, writeFile, actions]);
 
   useEffect(() => {
-    if (webcontainer && terminal && !setupExecuted.current) {
-      if (initialFiles.some((f) => f.path === "setup.sh")) {
-        setupExecuted.current = true;
+    console.log("webcontainer", webcontainer, terminal);
+  }, [webcontainer, terminal]);
 
-        setAiStatus("环境就绪，正在自动执行 setup.sh...");
+  useEffect(() => {
+    if (webcontainer && terminal && !setupFlowHasRun.current) {
+      setupFlowHasRun.current = true;
 
-        runCommand("sh", ["setup.sh"])
-          .then(() => {
-            setAiStatus("启动脚本执行完毕。");
-            toast.success("项目已自动启动！");
-          })
-          .catch((err) => {
-            const errorMessage =
-              err instanceof Error ? err.message : "未知错误";
-            setAiStatus("自动执行启动脚本时出错。");
-            toast.error("自动启动项目失败", { description: errorMessage });
-          });
+      const setupShExists = initialFiles.some((f) => f.path === "setup.sh");
+      console.log("setup.sh exists:", setupShExists);
+      // 决策点：根据 setup.sh 是否存在来决定终端的用途
+      if (setupShExists) {
+        // 场景一：存在 setup.sh，将其作为后台任务运行
+        actions.setAiStatus("检测到 setup.sh，正在作为后台任务执行...");
+        toast.info("正在执行启动脚本 setup.sh...");
+        actions.runBackgroundTask("sh", ["setup.sh"]);
+        actions.setAiStatus("启动脚本正在后台运行。终端将显示其日志。");
+      } else {
+        // 场景二：不存在 setup.sh，直接为用户提供一个可交互的 Shell
+        actions.setAiStatus("项目就绪，启动交互式终端...");
+        actions.startInteractiveShell();
+      }
+
+      // 初始的 AI 调用逻辑
+      if (isFirstLoad && !initialAiCallFired) {
+        actions.setInitialAiCallFired();
+        actions.setAiStatus("正在初始化 AI 对话...");
+        actions.resetOperationStatuses();
+        // 稍微延迟，以确保终端的初始信息（如交互式shell提示符）能先显示
+        setTimeout(() => chatHook.reload(), 500);
       }
     }
-  }, [webcontainer, terminal, initialFiles, runCommand, setAiStatus]);
+  }, [
+    webcontainer,
+    terminal,
+    initialFiles,
+    isFirstLoad,
+    initialAiCallFired,
+    actions,
+    chatHook,
+  ]);
 }

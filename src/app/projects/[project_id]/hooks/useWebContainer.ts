@@ -3,96 +3,26 @@
 import { useCallback } from "react";
 import { WebContainer } from "@webcontainer/api";
 import { toast } from "sonner";
-import { useWorkspaceStore } from "@/stores/workspaceStore";
+import {
+  useWorkspaceStore,
+  useWorkspaceStoreApi,
+} from "@/stores/WorkspaceStoreProvider";
 
+/**
+ * 一个封装了 WebContainer 核心交互逻辑的自定义 Hook。
+ * 职责聚焦于 WebContainer 的生命周期管理和文件I/O。
+ * @param projectId - 当前项目的ID，用于关联 WebContainer 实例。
+ */
 export function useWebContainer(projectId: string) {
   const actions = useWorkspaceStore((state) => state.actions);
-
   const { setWebcontainer, setPreviewUrl } = actions;
-
-  const runCommand = useCallback(
-    async (command: string, args: string[] = []) => {
-      const wc = useWorkspaceStore.getState().webcontainer;
-      const term = useWorkspaceStore.getState().terminal;
-
-      if (!wc || !term) {
-        const message = !wc
-          ? "WebContainer is not ready."
-          : "Terminal is not ready.";
-        toast.warning("环境尚未就绪，命令执行已跳过", { description: message });
-        throw new Error(`Execution skipped: ${message}`);
-      }
-
-      const fullCommand = `${command} ${args.join(" ")}`;
-      term.write(`\r\n\x1b[1;32m$ \x1b[0m${fullCommand}\r\n`);
-
-      const process = await wc.spawn(command, args);
-
-      let combinedOutput = "";
-      process.output.pipeTo(
-        new WritableStream({
-          write(data) {
-            combinedOutput += data;
-            term.write(data);
-          },
-        })
-      );
-
-      const exitCode = await process.exit;
-
-      if (exitCode !== 0) {
-        term.write(
-          `\r\n\x1b[1;31mProcess exited with error code ${exitCode}\x1b[0m\r\n`
-        );
-        throw new Error(
-          `Command failed with exit code ${exitCode}.\n--- OUTPUT ---\n${combinedOutput}`
-        );
-      }
-
-      term.write(
-        `\r\n\x1b[1;33mProcess exited with code ${exitCode}\x1b[0m\r\n`
-      );
-    },
-    []
-  );
-
-  const writeFile = useCallback(async (path: string, content: string) => {
-    const wc = useWorkspaceStore.getState().webcontainer;
-    if (!wc) {
-      toast.warning("WebContainer not ready, file write operation skipped.");
-      return;
-    }
-    const dir = path.substring(0, path.lastIndexOf("/"));
-    if (dir) {
-      await wc.fs.mkdir(dir, { recursive: true });
-    }
-    await wc.fs.writeFile(path, content);
-  }, []);
-
-  const readFile = useCallback(async (path: string): Promise<string | null> => {
-    const wc = useWorkspaceStore.getState().webcontainer;
-    if (!wc) {
-      toast.warning("开发容器尚未就绪，请稍候。");
-      return null;
-    }
-    try {
-      return await wc.fs.readFile(path, "utf-8");
-    } catch (e) {
-      console.error(`Error reading file "${path}":`, e);
-      return null;
-    }
-  }, []);
-
-  const deleteFile = useCallback(async (path: string) => {
-    const wc = useWorkspaceStore.getState().webcontainer;
-    if (!wc) {
-      throw new Error("WebContainer not ready to delete file.");
-    }
-    await wc.fs.rm(path, { recursive: true });
-  }, []);
-
+  const storeApi = useWorkspaceStoreApi();
+  /**
+   * 初始化 WebContainer 实例。
+   * 如果实例已存在则直接返回，否则启动一个新的实例并设置监听器。
+   */
   const initWebContainer = useCallback(async () => {
-    const currentWc = useWorkspaceStore.getState().webcontainer;
+    const currentWc = storeApi.getState().webcontainer;
     if (currentWc) return;
 
     toast.loading("正在启动云端开发环境...", { id: "wc-boot" });
@@ -104,6 +34,7 @@ export function useWebContainer(projectId: string) {
         setPreviewUrl(`${url}?t=${Date.now()}`);
         toast.success("预览服务器已就绪！");
       });
+
       wc.on("error", (error) =>
         toast.error("开发容器发生错误", { description: error.message })
       );
@@ -118,46 +49,65 @@ export function useWebContainer(projectId: string) {
     }
   }, [setWebcontainer, projectId, setPreviewUrl]);
 
+  /**
+   * 安全地卸载 WebContainer 实例并重置相关状态。
+   */
   const teardown = useCallback(() => {
-    const wc = useWorkspaceStore.getState().webcontainer;
+    const wc = storeApi.getState().webcontainer;
     wc?.teardown();
     setWebcontainer(null, null);
   }, [setWebcontainer]);
 
-  const runBackgroundTask = useCallback(
-    async (
-      command: string,
-      args: string[],
-      onOutput: (data: string) => void
-    ) => {
-      const wc = useWorkspaceStore.getState().webcontainer;
+  /**
+   * 在 WebContainer 的虚拟文件系统中写入或更新一个文件。
+   * 会自动创建不存在的目录。
+   */
+  const writeFile = useCallback(async (path: string, content: string) => {
+    const wc = storeApi.getState().webcontainer;
+    if (!wc) {
+      toast.warning("WebContainer not ready, file write operation skipped.");
+      return;
+    }
+    const dir = path.substring(0, path.lastIndexOf("/"));
+    if (dir) {
+      await wc.fs.mkdir(dir, { recursive: true });
+    }
+    await wc.fs.writeFile(path, content);
+  }, []);
 
-      if (!wc) {
-        toast.error("WebContainer is not ready.");
-        return null;
-      }
+  /**
+   * 从 WebContainer 的虚拟文件系统中读取一个文件。
+   */
+  const readFile = useCallback(async (path: string): Promise<string | null> => {
+    const wc = storeApi.getState().webcontainer;
+    if (!wc) {
+      toast.warning("开发容器尚未就绪，请稍候。");
+      return null;
+    }
+    try {
+      return await wc.fs.readFile(path, "utf-8");
+    } catch (e) {
+      console.error(`Error reading file "${path}":`, e);
+      return null;
+    }
+  }, []);
 
-      const process = await wc.spawn(command, args);
-      process.output.pipeTo(new WritableStream({ write: onOutput }));
-
-      return {
-        process,
-        stop: () => {
-          process.kill();
-          onOutput("\r\nTask stopped by user.\r\n");
-        },
-      };
-    },
-    []
-  );
+  /**
+   * 从 WebContainer 的虚拟文件系统中删除一个文件或目录。
+   */
+  const deleteFile = useCallback(async (path: string) => {
+    const wc = storeApi.getState().webcontainer;
+    if (!wc) {
+      throw new Error("WebContainer not ready to delete file.");
+    }
+    await wc.fs.rm(path, { recursive: true });
+  }, []);
 
   return {
     initWebContainer,
+    teardown,
     writeFile,
     readFile,
-    runCommand,
     deleteFile,
-    teardown,
-    runBackgroundTask,
   };
 }

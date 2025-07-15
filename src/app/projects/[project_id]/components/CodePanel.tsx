@@ -5,116 +5,72 @@ import { Terminal } from "xterm";
 import "xterm/css/xterm.css";
 import { FitAddon } from "xterm-addon-fit";
 import CodeMirror from "@uiw/react-codemirror";
-import { javascript } from "@codemirror/lang-javascript";
-import { css } from "@codemirror/lang-css";
-import { html } from "@codemirror/lang-html";
-import { json } from "@codemirror/lang-json";
-import { markdown as md } from "@codemirror/lang-markdown";
 import { okaidia } from "@uiw/codemirror-theme-okaidia";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { TerminalSquare } from "lucide-react";
-import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { Lightbulb, TerminalSquare } from "lucide-react";
+import { useWorkspaceStore } from "@/stores/WorkspaceStoreProvider";
 import { useWebContainer } from "../hooks/useWebContainer";
 import { toast } from "sonner";
 import { useDebounceFn } from "ahooks";
 import { FileOperationType } from "@/types/ai";
 import { apiClient } from "@/lib/apiClient";
 import { FileTree } from "./FileTree";
-import type { WebContainerProcess } from "@webcontainer/api";
+import { Button } from "@/components/ui/button";
+import { getLanguageExtension } from "../utils/markdown";
+import { cn } from "@/lib/utils";
 
-const getLanguageExtension = (filePath: string | null) => {
-  if (!filePath) return [];
-  const ext = filePath?.split(".").pop();
-  switch (ext) {
-    case "js":
-    case "jsx":
-    case "ts":
-    case "tsx":
-      return [javascript({ jsx: true, typescript: true })];
-    case "css":
-      return [css()];
-    case "html":
-      return [html()];
-    case "json":
-      return [json()];
-    case "md":
-      return [md()];
-    default:
-      return [];
-  }
-};
+export function CodePanel({
+  onFixDevError,
+}: {
+  onFixDevError: (errorLog: string) => void;
+}) {
+  const fileSystem = useWorkspaceStore((state) => state.fileSystem);
+  const activeFile = useWorkspaceStore((state) => state.activeFile);
+  const editorContent = useWorkspaceStore((state) => state.editorContent);
+  const actions = useWorkspaceStore((state) => state.actions);
+  const currentProjectId = useWorkspaceStore((state) => state.currentProjectId);
+  const devErrors = useWorkspaceStore((state) => state.devErrors);
 
-export function CodePanel() {
-  const {
-    fileSystem,
-    activeFile,
-    editorContent,
-    webcontainer,
-    terminal,
-    actions,
-    currentProjectId,
-  } = useWorkspaceStore();
-
-  const { setTerminal, setActiveFile, setEditorContent } = actions;
-
+  const { setActiveFile, setEditorContent, dismissDevError, setTerminal } =
+    actions;
   const { readFile, writeFile } = useWebContainer(currentProjectId || "");
 
   const terminalRef = useRef<HTMLDivElement>(null);
-  const termInstanceRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const shellProcessRef = useRef<WebContainerProcess | null>(null);
   const isTerminalInitialized = useRef(false);
 
   const { run: debouncedSaveToDb } = useDebounceFn(
     async (path: string, content: string) => {
-      const projectId = window.location.pathname.split("/projects/")[1];
-      if (!projectId) return;
+      if (!currentProjectId) return;
       toast.info("正在保存改动...");
-      await apiClient(`/api/projects/${projectId}/files`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operations: [{ type: FileOperationType.UPDATE, path, content }],
-        }),
-      });
-      toast.success("改动已保存！");
+      try {
+        await apiClient(`/api/projects/${currentProjectId}/files`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operations: [{ type: FileOperationType.UPDATE, path, content }],
+            projectId: currentProjectId,
+          }),
+        });
+        toast.success("改动已保存！");
+      } catch (error) {
+        toast.error("保存失败", {
+          description: error instanceof Error ? error.message : "未知错误",
+        });
+      }
     },
-    { wait: 1500 }
+    { wait: 2000 }
   );
 
   const { run: debouncedFit } = useDebounceFn(
-    () => {
-      const termEl = terminalRef.current;
-      if (
-        termEl &&
-        termEl.clientWidth > 0 &&
-        termEl.clientHeight > 0 &&
-        fitAddonRef.current
-      ) {
-        setTimeout(() => {
-          try {
-            fitAddonRef.current?.fit();
-          } catch (e) {
-            console.warn(
-              "Terminal fit failed, container might not be ready:",
-              e
-            );
-          }
-        }, 0);
-      }
-    },
-    { wait: 100 }
+    () => fitAddonRef.current?.fit(),
+    { wait: 50 }
   );
 
   const handleFileClick = useCallback(
     async (path: string) => {
       const content = await readFile(path);
-      if (content === null) {
-        toast.error(`读取文件 ${path} 失败`);
-        setActiveFile(path, "");
-      } else {
-        setActiveFile(path, content);
-      }
+      setActiveFile(path, content ?? "");
     },
     [readFile, setActiveFile]
   );
@@ -136,20 +92,24 @@ export function CodePanel() {
   );
 
   useEffect(() => {
-    if (isTerminalInitialized.current || !terminalRef.current) return;
+    if (!terminalRef.current || isTerminalInitialized.current) {
+      console.log(
+        "[CodePanel Effect] Aborting: terminalRef not ready or already initialized."
+      );
+      return;
+    }
 
-    isTerminalInitialized.current = true;
-
-    const initTimeoutId = setTimeout(() => {
-      if (!terminalRef.current) return;
+    try {
+      isTerminalInitialized.current = true;
 
       const term = new Terminal({
         convertEol: true,
         cursorBlink: true,
-        theme: { background: "#0D1117" },
+        theme: { background: "#0D1117", foreground: "#e0e0e0" },
         rows: 15,
         fontSize: 13,
-        lineHeight: 1.2,
+        fontFamily: "var(--font-geist-mono), monospace",
+        lineHeight: 1.4,
       });
 
       const fitAddon = new FitAddon();
@@ -157,101 +117,34 @@ export function CodePanel() {
 
       term.open(terminalRef.current);
 
-      termInstanceRef.current = term;
       fitAddonRef.current = fitAddon;
       setTerminal(term);
 
       debouncedFit();
-
-      const resizeObserver = new ResizeObserver(() => {
-        debouncedFit();
-      });
-      resizeObserver.observe(terminalRef.current);
-
-      (
-        term as Terminal & { _resizeObserver?: ResizeObserver }
-      )._resizeObserver = resizeObserver;
-    }, 0);
-    return () => {
-      clearTimeout(initTimeoutId);
-
-      if (termInstanceRef.current) {
-        const observer = (
-          termInstanceRef.current as Terminal & {
-            _resizeObserver?: ResizeObserver;
-          }
-        )._resizeObserver;
-        if (observer) {
-          observer.disconnect();
-        }
-        termInstanceRef.current.dispose();
+      const resizeObserver = new ResizeObserver(debouncedFit);
+      if (terminalRef.current) {
+        resizeObserver.observe(terminalRef.current);
       }
 
-      termInstanceRef.current = null;
-      fitAddonRef.current = null;
-      setTerminal(null);
-      isTerminalInitialized.current = false;
-    };
+      return () => {
+        resizeObserver.disconnect();
+        term.dispose();
+        setTerminal(null);
+        isTerminalInitialized.current = false;
+      };
+    } catch (error) {
+      console.error(
+        "%c[CodePanel Effect] CRITICAL FAILURE during terminal initialization:",
+        "color: red; font-weight: bold;",
+        error
+      );
+      toast.error("终端初始化失败", {
+        description: "无法加载代码终端，请检查浏览器控制台以获取详细信息。",
+      });
+    }
   }, [setTerminal, debouncedFit]);
 
-  useEffect(() => {
-    if (!webcontainer || !terminal) return;
-
-    const linkTerminalToShell = async () => {
-      if (shellProcessRef.current) {
-        shellProcessRef.current.kill();
-      }
-
-      const shellProcess = await webcontainer.spawn("jsh", {
-        terminal: {
-          cols: terminal.cols,
-          rows: terminal.rows,
-        },
-      });
-      shellProcessRef.current = shellProcess;
-
-      shellProcess.output.pipeTo(
-        new WritableStream({
-          write(data) {
-            terminal.write(data);
-          },
-        })
-      );
-
-      const writer = shellProcess.input.getWriter();
-
-      // [数据流: 终端 -> Shell] 监听终端的用户输入事件，并将数据写入shell的输入流
-      const onDataDisposable = terminal.onData((data) => {
-        writer.write(data);
-      });
-
-      // 监听终端尺寸变化，并同步到shell进程
-      const onResizeDisposable = terminal.onResize((dim) => {
-        shellProcess.resize(dim);
-      });
-
-      // 当shell进程退出时（例如用户按Ctrl+C），自动重启一个新的shell
-      shellProcess.exit.then(() => {
-        shellProcessRef.current = null;
-        terminal.write(
-          "\r\n\x1b[33mShell session ended. Starting a new one...\x1b[0m\r\n"
-        );
-        // 清理旧的监听器，然后重新连接
-        onDataDisposable.dispose();
-        onResizeDisposable.dispose();
-        linkTerminalToShell();
-      });
-    };
-
-    linkTerminalToShell();
-
-    return () => {
-      if (shellProcessRef.current) {
-        shellProcessRef.current.kill();
-        shellProcessRef.current = null;
-      }
-    };
-  }, [webcontainer, terminal]);
+  const activeErrors = devErrors.filter((e) => e.status === "active");
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -260,7 +153,6 @@ export function CodePanel() {
           文件浏览器
         </h3>
         <ScrollArea className="flex-1">
-          {/* ✨ Bug修复: 移除 w-[max-content]，让其自然填充 */}
           <div className="space-y-1 pr-2">
             {fileSystem.length > 0 ? (
               <FileTree
@@ -291,17 +183,57 @@ export function CodePanel() {
                 foldGutter: true,
                 allowMultipleSelections: true,
                 indentOnInput: true,
+                lineNumbers: true,
+                autocompletion: true,
               }}
               style={{ height: "100%" }}
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-neutral-500 transition-none">
+            <div className="w-full h-full flex items-center justify-center text-neutral-500">
               <p>请从左侧选择一个文件进行编辑</p>
             </div>
           )}
         </div>
-        <div className="h-[40%] border-t border-neutral-800 flex flex-col">
-          <div className="bg-[#161b22] px-4 py-1.5 text-xs font-semibold flex items-center text-neutral-300 border-b border-neutral-800">
+        <div className="h-[40%] border-t border-neutral-800 flex flex-col relative">
+          {activeErrors.length > 0 && (
+            <div className="absolute top-0 left-0 right-0 z-10 flex flex-col max-h-[100%] overflow-y-auto">
+              {activeErrors.map((error) => (
+                <div
+                  key={error.id}
+                  className="bg-yellow-900/80 backdrop-blur-sm p-2 border-b border-yellow-700/60 flex justify-between items-center gap-4"
+                >
+                  <div className="flex items-start gap-2 text-yellow-200 text-sm overflow-hidden">
+                    <Lightbulb size={16} className="flex-shrink-0 mt-0.5" />
+                    <p className="truncate" title={error.log}>
+                      AI 检测到问题: {error.log.split("\n")[0]}
+                    </p>
+                  </div>
+                  <div className="flex-shrink-0 flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => dismissDevError(error.id)}
+                    >
+                      忽略
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => onFixDevError(error.log)}
+                      className="bg-yellow-500 hover:bg-yellow-600 text-black"
+                    >
+                      AI 修复
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div
+            className={cn(
+              "bg-[#161b22] px-4 py-1.5 text-xs font-semibold flex items-center text-neutral-300 border-b border-neutral-800",
+              activeErrors.length > 0 && "opacity-0 pointer-events-none"
+            )}
+          >
             <TerminalSquare size={14} className="mr-2" /> 终端
           </div>
           <div
