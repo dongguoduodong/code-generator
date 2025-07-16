@@ -49,43 +49,50 @@ export function Workspace() {
     }
   });
 
-  const handleGenerateProject = useSerialCallback(async () => {
-    const trimmedPrompt = prompt.trim();
-    if (!trimmedPrompt) return;
+  const handleGenerateProject = useSerialCallback(
+    async () => {
+      const trimmedPrompt = prompt.trim();
+      if (!trimmedPrompt) return;
 
-    if (!trimmedPrompt) return;
-    const toastId = toast.loading("正在为您创建新项目，请稍候...");
+      if (!trimmedPrompt) return;
+      const toastId = toast.loading("正在为您创建新项目，请稍候...");
 
-    try {
-      const response = await apiClient("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: trimmedPrompt }),
-      });
+      try {
+        const response = await apiClient("/api/projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: trimmedPrompt }),
+        });
 
-      if (!response.ok) {
-        const errorData = await response
-          .json()
-          .catch(() => ({ message: "未知错误" }));
-        throw new Error(errorData.message || "项目创建请求失败");
+        if (!response.ok) {
+          const errorData = await response
+            .json()
+            .catch(() => ({ message: "未知错误" }));
+          throw new Error(errorData.message || "项目创建请求失败");
+        }
+
+        const newProject = await response.json();
+
+        toast.success(`项目 "${newProject.name}" 创建成功!`, {
+          id: toastId,
+        });
+
+        router.push(`/projects/${newProject.id}`);
+      } catch (error: unknown) {
+        console.error("Error creating project via AI:", error);
+        toast.error("项目创建失败", {
+          id: toastId,
+          description:
+            error instanceof Error
+              ? error.message
+              : "请检查控制台获取更多信息。",
+        });
       }
-
-      const newProject = await response.json();
-
-      toast.success(`项目 "${newProject.name}" 创建成功!`, {
-        id: toastId,
-      });
-
-      router.push(`/projects/${newProject.id}`);
-    } catch (error: unknown) {
-      console.error("Error creating project via AI:", error);
-      toast.error("项目创建失败", {
-        id: toastId,
-        description:
-          error instanceof Error ? error.message : "请检查控制台获取更多信息。",
-      });
+    },
+    {
+      triggerReRenderOnBusyStatusChange: false,
     }
-  });
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
