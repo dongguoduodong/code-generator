@@ -53,7 +53,7 @@ export default function ChatPanel({ chatHook, project }: ChatPanelProps) {
           {project.name} - AI Assistant
         </h2>
         <p className="text-xs text-yellow-400 font-mono animate-pulse h-4 truncate">
-          {isLoading ? aiStatus : "AI 正在待命..."}
+          {isLoading ? aiStatus : ""}
         </p>
       </header>
       <div

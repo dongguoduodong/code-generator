@@ -13,15 +13,18 @@ import { filterAndSnapshotFileSystem } from "./utils/fileSystem";
 import ChatPanel from "./components/ChatPanel";
 import WorkspacePanel from "./components/WorkspacePanel";
 import { ChatRequestOptions } from "ai";
-import { useWorkspaceStore, useWorkspaceStoreApi } from "@/stores/WorkspaceStoreProvider";
+import {
+  useWorkspaceStore,
+  useWorkspaceStoreApi,
+} from "@/stores/WorkspaceStoreProvider";
 
 export default function ProjectClientPage(props: ProjectClientPageProps) {
   const { project } = props;
 
   const actions = useWorkspaceStore((state) => state.actions);
-  const executionError = useWorkspaceStore((state => state.executionError));
+  const executionError = useWorkspaceStore((state) => state.executionError);
   const webcontainer = useWorkspaceStore((state) => state.webcontainer);
-    
+
   const storeApi = useWorkspaceStoreApi();
   const {
     enqueueInstructions,
@@ -63,7 +66,7 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
       projectId: props.project.id,
     },
     onFinish: () => {
-      setAiStatus("AI 已完成任务，正在待命...");
+      setAiStatus("");
       processedNodeIds.current.clear();
     },
     onError: (err) => setAiStatus(`出现错误: ${err.message}`),

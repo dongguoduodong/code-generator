@@ -34,7 +34,22 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
   const setupFlowHasRun = useRef(false);
 
   useMount(async () => {
-    await initWebContainer();
+    const webcontainerInstance = await initWebContainer();
+    if (webcontainerInstance) {
+      const { Terminal } = await import("xterm");
+      const term = new Terminal({
+        convertEol: true,
+        cursorBlink: true,
+        theme: { background: "#0D1117", foreground: "#e0e0e0" },
+        rows: 15,
+        fontSize: 13,
+        fontFamily: "var(--font-geist-mono), monospace",
+        lineHeight: 1.4,
+      });
+
+      actions.setWebcontainer(webcontainerInstance, project.id);
+      actions.setTerminal(term);
+    }
   });
 
   useEffect(() => {
@@ -60,10 +75,6 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
     };
     hydrate();
   }, [webcontainer, initialFiles, writeFile, actions]);
-
-  useEffect(() => {
-    console.log("webcontainer", webcontainer, terminal);
-  }, [webcontainer, terminal]);
 
   useEffect(() => {
     if (webcontainer && terminal && !setupFlowHasRun.current) {

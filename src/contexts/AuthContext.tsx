@@ -112,7 +112,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email,
       password,
     });
-    console.log("error", error);
     if (error) throw error;
   };
 

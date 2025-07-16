@@ -83,7 +83,9 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isSignUp ? "注册账户" : "登录到 AI Spark"}</DialogTitle>
+          <DialogTitle>
+            {isSignUp ? "注册账户" : "登录到 Code Generator"}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <Button

@@ -105,7 +105,7 @@ const initialState: Omit<WorkspaceState, "actions"> = {
   editorContent: "",
   previewUrl: "",
   isLoadingContainer: true,
-  aiStatus: "AI 正在待命...",
+  aiStatus: "",
   instructionQueue: [],
   operationStatuses: {},
   isProcessing: false,

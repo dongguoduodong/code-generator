@@ -109,12 +109,12 @@ export async function POST(req: NextRequest) {
 
     const lastMessage = messages[messages.length - 1];
 
-    if (lastMessage.role === "user") {
+    if (lastMessage.role === "user" && messages.length > 1) {
       saveMessageInDb(supabase, {
         projectId,
         content: lastMessage.content as string,
         role: "user",
-      }).catch(console.error); // 在后台执行，不阻塞请求
+      }).catch(console.error);
     }
 
     let gitignoreContent = "";

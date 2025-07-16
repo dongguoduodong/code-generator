@@ -40,12 +40,14 @@ export function useWebContainer(projectId: string) {
       );
 
       toast.success("开发环境已就绪！", { id: "wc-boot" });
+      return wc;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "未知错误";
       toast.error("启动开发环境失败", {
         id: "wc-boot",
         description: errorMessage,
       });
+      return null;
     }
   }, [setWebcontainer, projectId, setPreviewUrl]);
 

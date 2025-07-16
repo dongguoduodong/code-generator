@@ -36,7 +36,7 @@ const Home = () => {
           <div className="container mx-auto px-4 py-4 flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <Zap className="h-6 w-6 text-primary" />
-              <h1 className="text-xl font-bold">AI Spark</h1>
+              <h1 className="text-xl font-bold">Code Generator</h1>
             </div>
             <div className="flex items-center space-x-4">
               <div className="text-sm text-muted-foreground">
@@ -62,7 +62,7 @@ const Home = () => {
         <div className="text-center mb-16">
           <div className="flex items-center justify-center space-x-2 mb-6">
             <Zap className="h-12 w-12 text-primary" />
-            <h1 className="text-4xl font-bold">AI Spark</h1>
+            <h1 className="text-4xl font-bold">Code Generator</h1>
           </div>
           <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
             使用自然语言创建完整的项目。AI驱动的代码生成平台，让编程变得简单而直观。

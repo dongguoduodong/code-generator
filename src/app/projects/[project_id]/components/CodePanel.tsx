@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useRef, useMemo, useCallback } from "react";
-import { Terminal } from "xterm";
 import "xterm/css/xterm.css";
 import { FitAddon } from "xterm-addon-fit";
 import CodeMirror from "@uiw/react-codemirror";
@@ -30,14 +29,14 @@ export function CodePanel({
   const actions = useWorkspaceStore((state) => state.actions);
   const currentProjectId = useWorkspaceStore((state) => state.currentProjectId);
   const devErrors = useWorkspaceStore((state) => state.devErrors);
+  const terminal = useWorkspaceStore((state) => state.terminal);
 
-  const { setActiveFile, setEditorContent, dismissDevError, setTerminal } =
+  const { setActiveFile, setEditorContent, dismissDevError } =
     actions;
   const { readFile, writeFile } = useWebContainer(currentProjectId || "");
 
   const terminalRef = useRef<HTMLDivElement>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const isTerminalInitialized = useRef(false);
 
   const { run: debouncedSaveToDb } = useDebounceFn(
     async (path: string, content: string) => {
@@ -92,57 +91,35 @@ export function CodePanel({
   );
 
   useEffect(() => {
-    if (!terminalRef.current || isTerminalInitialized.current) {
-      console.log(
-        "[CodePanel Effect] Aborting: terminalRef not ready or already initialized."
-      );
-      return;
-    }
+    // Terminal is now created centrally. This effect's job is to attach it to the DOM.
+    if (terminal && terminalRef.current && !terminal.element) {
+      try {
+        const fitAddon = new FitAddon();
+        fitAddonRef.current = fitAddon;
+        terminal.loadAddon(fitAddon);
+        terminal.open(terminalRef.current);
+        fitAddon.fit();
 
-    try {
-      isTerminalInitialized.current = true;
-
-      const term = new Terminal({
-        convertEol: true,
-        cursorBlink: true,
-        theme: { background: "#0D1117", foreground: "#e0e0e0" },
-        rows: 15,
-        fontSize: 13,
-        fontFamily: "var(--font-geist-mono), monospace",
-        lineHeight: 1.4,
-      });
-
-      const fitAddon = new FitAddon();
-      term.loadAddon(fitAddon);
-
-      term.open(terminalRef.current);
-
-      fitAddonRef.current = fitAddon;
-      setTerminal(term);
-
-      debouncedFit();
-      const resizeObserver = new ResizeObserver(debouncedFit);
-      if (terminalRef.current) {
+        const resizeObserver = new ResizeObserver(debouncedFit);
         resizeObserver.observe(terminalRef.current);
-      }
 
-      return () => {
-        resizeObserver.disconnect();
-        term.dispose();
-        setTerminal(null);
-        isTerminalInitialized.current = false;
-      };
-    } catch (error) {
-      console.error(
-        "%c[CodePanel Effect] CRITICAL FAILURE during terminal initialization:",
-        "color: red; font-weight: bold;",
-        error
-      );
-      toast.error("终端初始化失败", {
-        description: "无法加载代码终端，请检查浏览器控制台以获取详细信息。",
-      });
+        return () => {
+          resizeObserver.disconnect();
+          // We don't dispose the terminal here on unmount
+          // as it's part of the global workspace state now.
+        };
+      } catch (error) {
+        console.error(
+          "%c[CodePanel Effect] CRITICAL FAILURE during terminal attachment:",
+          "color: red; font-weight: bold;",
+          error
+        );
+        toast.error("终端附加失败", {
+          description: "无法将终端附加到DOM，请检查浏览器控制台。",
+        });
+      }
     }
-  }, [setTerminal, debouncedFit]);
+  }, [terminal, debouncedFit]);
 
   const activeErrors = devErrors.filter((e) => e.status === "active");
 
