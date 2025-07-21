@@ -75,6 +75,7 @@ export function Workspace() {
 
         toast.success(`项目 "${newProject.name}" 创建成功!`, {
           id: toastId,
+          description: "正在加载工作区，这可能需要一些时间...",
         });
 
         router.push(`/projects/${newProject.id}`);

@@ -6,6 +6,7 @@ import { HardDrive, Code as CodeIcon, Play } from "lucide-react";
 import PreviewPanel from "./PreviewPanel";
 import { useWorkspaceStore } from "@/stores/WorkspaceStoreProvider";
 import { cn } from "@/lib/utils";
+import { PerformanceMonitor } from "./PerformanceMonitor";
 
 const CodePanel = dynamic(
   () => import("./CodePanel").then((mod) => mod.CodePanel),
@@ -84,6 +85,7 @@ export default function WorkspacePanel({
           />
         </TabsContent>
       </Tabs>
+      <PerformanceMonitor />
     </main>
   );
 }

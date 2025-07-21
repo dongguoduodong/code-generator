@@ -2,11 +2,17 @@ import { streamText, generateObject, CoreMessage } from "ai";
 import { saveMessageInDb } from "@/lib/db/message";
 import { customOpenai } from "@/lib/openai";
 import { NextResponse, NextRequest } from "next/server";
-import { ROUTER_PROMPT, PLANNER_PROMPT, CODER_PROMPT } from "@/lib/prompts";
+import {
+  ROUTER_PROMPT,
+  PLANNER_PROMPT,
+  CODER_PROMPT,
+  E2E_PROMPT,
+} from "@/lib/prompts";
 import { RouterDecisionSchema, type RouterDecision } from "@/lib/schemas";
 import ignore from "ignore";
 import { getFilesForProject } from "@/lib/db/file";
 import { authenticateRoute } from "@/lib/api/auth";
+import { getTemplateById } from "@/lib/templates";
 
 export const maxDuration = 120;
 
@@ -69,12 +75,12 @@ function preJudgmentRouter(
     const isConfirmation = POSITIVE_CONFIRMATIONS.has(
       userContent.replace(/[.!?]/g, "")
     );
-
     if (
       isConfirmation &&
       previousMessage.role === "assistant" &&
       typeof previousMessage.content === "string" &&
-      previousMessage.content.trim().endsWith("?") // 简单的计划检测
+      (previousMessage.content.trim().endsWith("?") ||
+        previousMessage.content.trim().endsWith("？")) // 简单的计划检测
     ) {
       return {
         decision: "CODE",
@@ -150,39 +156,26 @@ export async function POST(req: NextRequest) {
       .map((m) => `${m.role}: ${m.content}`)
       .join("\n");
 
-    let routerDecision: RouterDecision;
-    const fastPathDecision = preJudgmentRouter(messages);
+    const architecture = process.env.NEXT_PUBLIC_AI_ARCHITECTURE || "TRI_AGENT";
+    let finalResponseStream;
 
-    if (fastPathDecision) {
-      // 快速通道：使用本地预判断的决策
-      console.log("Fast-path decision made:", fastPathDecision.decision);
-      routerDecision = {
-        reason: "Pre-judged for performance.",
-        ...fastPathDecision,
-      };
-    } else {
-      // 通用路径：回退到 Router Agent 进行决策
-      console.log("Falling back to Router Agent...");
-      const routerSystemPrompt = ROUTER_PROMPT.replace(
+    // --- 性能测量点 ---
+    let t_preJudgment: number | null = null;
+    let t_router: number | null = null;
+
+    if (architecture === "END_TO_END") {
+      // --- 端到端模型路径 ---
+      console.log("Executing with End-to-End Model...");
+
+      const systemPrompt = E2E_PROMPT.replace(
         "{conversation_history}",
         conversationHistory
       ).replace("{file_system_snapshot}", fileContext);
 
-      const { object } = await generateObject<RouterDecision>({
-        model: customOpenai("gemini-2.5-flash-preview-05-20"),
-        system: routerSystemPrompt,
-        prompt: `User's latest message: "${lastMessage.content}"`,
-        schema: RouterDecisionSchema,
-      });
-      routerDecision = object;
-    }
-
-    let finalResponseStream;
-    if (routerDecision.decision === "PLAN") {
       finalResponseStream = await streamText({
         model: customOpenai("gemini-2.5-pro"),
-        system: PLANNER_PROMPT,
-        prompt: routerDecision.next_prompt_input,
+        system: systemPrompt,
+        prompt: `User's latest request: "${lastMessage.content}"`,
         async onFinish(result) {
           saveMessageInDb(supabase, {
             projectId,
@@ -192,21 +185,113 @@ export async function POST(req: NextRequest) {
         },
       });
     } else {
-      finalResponseStream = await streamText({
-        model: customOpenai("gemini-2.5-pro"),
-        system: CODER_PROMPT,
-        prompt: routerDecision.next_prompt_input,
-        async onFinish(result) {
-          saveMessageInDb(supabase, {
+      let routerDecision: RouterDecision;
+      const preJudgmentStartTime = performance.now();
+      const fastPathDecision = preJudgmentRouter(messages);
+      if (fastPathDecision) {
+        routerDecision = {
+          reason: "Pre-judged for performance.",
+          ...fastPathDecision,
+        };
+        t_preJudgment = performance.now() - preJudgmentStartTime;
+      } else {
+        // 通用路径：回退到 Router Agent 进行决策
+        const routerSystemPrompt = ROUTER_PROMPT.replace(
+          "{conversation_history}",
+          conversationHistory
+        ).replace("{file_system_snapshot}", fileContext);
+        const routerStartTime = performance.now();
+        const { object } = await generateObject<RouterDecision>({
+          model: customOpenai("gemini-2.5-flash-preview-05-20"),
+          system: routerSystemPrompt,
+          prompt: `User's latest message: "${lastMessage.content}"`,
+          schema: RouterDecisionSchema,
+        });
+        t_router = performance.now() - routerStartTime;
+
+        routerDecision = object;
+      }
+      if (routerDecision.templateId) {
+        const template = getTemplateById(routerDecision.templateId);
+
+        if (template) {
+          // 如果找到模板，则完全绕过 Planner LLM
+          // 立即将预定义的计划保存到数据库
+          await saveMessageInDb(supabase, {
             projectId,
-            content: result.text,
+            content: template.plan,
             role: "assistant",
           }).catch(console.error);
-        },
-      });
-    }
 
-    return finalResponseStream.toDataStreamResponse();
+          const readableStream = new ReadableStream({
+            async start(controller) {
+              // 1. 将模板计划按字拆分成数组
+              const chunks = template.plan.split("");
+
+              // 2. 循环遍历每个字
+              for (const chunk of chunks) {
+                // 3. 对每个字进行协议格式化
+                const escapedChunk = JSON.stringify(chunk).slice(1, -1);
+                const formattedChunk = `0:"${escapedChunk}"\n`;
+                controller.enqueue(new TextEncoder().encode(formattedChunk));
+
+                // 4. 等待一个微小的延迟，模拟打字间隔
+                await new Promise((resolve) => setTimeout(resolve, 5)); // 5毫秒延迟
+              }
+
+              controller.close();
+            },
+          });
+
+          return new Response(readableStream, {
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
+        } else {
+          console.warn(
+            `Router returned invalid templateId: ${routerDecision.templateId}`
+          );
+          // 如果模板ID无效，则降级到标准Planner流程
+        }
+      }
+
+      if (routerDecision.decision === "PLAN") {
+        finalResponseStream = await streamText({
+          model: customOpenai("gemini-2.5-pro"),
+          system: PLANNER_PROMPT,
+          prompt: routerDecision.next_prompt_input,
+          async onFinish(result) {
+            saveMessageInDb(supabase, {
+              projectId,
+              content: result.text,
+              role: "assistant",
+            }).catch(console.error);
+          },
+        });
+      } else {
+        finalResponseStream = await streamText({
+          model: customOpenai("gemini-2.5-pro"),
+          system: CODER_PROMPT,
+          prompt: routerDecision.next_prompt_input,
+          async onFinish(result) {
+            saveMessageInDb(supabase, {
+              projectId,
+              content: result.text,
+              role: "assistant",
+            }).catch(console.error);
+          },
+        });
+      }
+    }
+    const response = finalResponseStream.toDataStreamResponse();
+    if (t_router)
+      response.headers.set("X-Performance-Router-Time", t_router.toFixed(2));
+    if (t_preJudgment)
+      response.headers.set(
+        "X-Performance-Prejudgment-Time",
+        t_preJudgment.toFixed(2)
+      );
+
+    return response;
   } catch (error: unknown) {
     if (error instanceof Response) {
       return error;

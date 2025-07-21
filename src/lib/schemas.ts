@@ -9,6 +9,7 @@ export type RouterDecision = {
   decision: "PLAN" | "CODE";
   reason: string;
   next_prompt_input: string;
+  templateId?: "react-vite-basic";
 };
 
 export const RouterDecisionSchema: ZodType<RouterDecision> = z.object({
@@ -24,5 +25,11 @@ export const RouterDecisionSchema: ZodType<RouterDecision> = z.object({
     .string()
     .describe(
       "The precise input for the next stage. If the decision is 'CODE' because of a plan approval, this MUST be the full text of the approved plan. Otherwise, it should be the user's core instruction."
+    ),
+  templateId: z
+    .enum(["react-vite-basic"])
+    .optional()
+    .describe(
+      "If the user's request clearly matches a known project template, provide its ID here. Otherwise, leave it empty."
     ),
 });

@@ -42,10 +42,18 @@ export interface WorkspaceState {
   instructionQueue: { instruction: RenderNode; projectId: string }[];
   operationStatuses: Record<string, OperationStatusType>;
   isProcessing: boolean;
-  initialAiCallFired: boolean;
   currentProjectId: string | null;
   devErrors: DevError[];
+  performanceMetrics: PerformanceMetrics;
   actions: WorkspaceActions;
+}
+
+export interface PerformanceMetrics {
+  lastRequestDuration: number | null; // 后端API总耗时
+  routerDecisionTime: number | null; // Router Agent耗时
+  preJudgmentTime: number | null; // 本地快速决策耗时
+  timeToFirstToken: number | null; // 客户端TTFT
+  fullResponseTime: number | null; // 客户端完整响应时间
 }
 
 export interface WorkspaceActions {
@@ -68,13 +76,13 @@ export interface WorkspaceActions {
   updateOperationStatus: (id: string, status: OperationStatusType) => void;
   resetOperationStatuses: () => void;
   resetWorkspace: () => void;
-  setInitialAiCallFired: () => void;
   addDevError: (log: string) => void;
   dismissDevError: (errorId: string) => void;
   clearAllDevErrors: () => void;
   runCommand: (command: string, args: string[]) => Promise<void>;
   runBackgroundTask: (command: string, args: string[]) => void;
   startInteractiveShell: () => void;
+  setPerformanceMetrics: (metrics: Partial<PerformanceMetrics>) => void; // 3. 添加 action
 }
 
 const saveOperationsToDb = async (
@@ -109,14 +117,19 @@ const initialState: Omit<WorkspaceState, "actions"> = {
   instructionQueue: [],
   operationStatuses: {},
   isProcessing: false,
-  initialAiCallFired: false,
   currentProjectId: null,
   devErrors: [],
+  performanceMetrics: {
+    lastRequestDuration: null,
+    routerDecisionTime: null,
+    preJudgmentTime: null,
+    timeToFirstToken: null,
+    fullResponseTime: null,
+  },
 };
 
 export const createWorkspaceStore = () => {
   return create<WorkspaceState>()((set, get) => {
-
     const runCommandAsync = async (
       command: string,
       args: string[]
@@ -193,8 +206,8 @@ export const createWorkspaceStore = () => {
               instruction.type === "file"
                 ? `${instruction.action} ${instruction.path}`
                 : instruction.type === "terminal"
-                  ? instruction.command
-                  : ""
+                ? instruction.command
+                : ""
             }`
           );
 
@@ -299,7 +312,6 @@ export const createWorkspaceStore = () => {
           set((state) => ({
             operationStatuses: { ...state.operationStatuses, [id]: status },
           })),
-        setInitialAiCallFired: () => set({ initialAiCallFired: true }),
         enqueueInstructions: (nodes, projectId) => {
           const newQueueItems = nodes.map((instruction) => ({
             instruction,
@@ -341,6 +353,10 @@ export const createWorkspaceStore = () => {
         runCommand: runCommandAsync,
         runBackgroundTask: runBackgroundTaskAsync,
         startInteractiveShell: startInteractiveShellAsync,
+        setPerformanceMetrics: (metrics) =>
+          set((state) => ({
+            performanceMetrics: { ...state.performanceMetrics, ...metrics },
+          })),
       },
     };
   });

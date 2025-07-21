@@ -25,31 +25,41 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
   const webcontainer = useWorkspaceStore((state) => state.webcontainer);
   const terminal = useWorkspaceStore((state) => state.terminal);
   const actions = useWorkspaceStore((state) => state.actions);
-  const initialAiCallFired = useWorkspaceStore(
-    (state) => state.initialAiCallFired
-  );
+  const initialAiCallFiredRef = useRef(false);
 
   const { initWebContainer, writeFile } = useWebContainer(project.id);
   const hasHydrated = useRef(false);
   const setupFlowHasRun = useRef(false);
 
-  useMount(async () => {
-    const webcontainerInstance = await initWebContainer();
-    if (webcontainerInstance) {
-      const { Terminal } = await import("xterm");
-      const term = new Terminal({
-        convertEol: true,
-        cursorBlink: true,
-        theme: { background: "#0D1117", foreground: "#e0e0e0" },
-        rows: 15,
-        fontSize: 13,
-        fontFamily: "var(--font-geist-mono), monospace",
-        lineHeight: 1.4,
-      });
-
-      actions.setWebcontainer(webcontainerInstance, project.id);
-      actions.setTerminal(term);
+  useMount(() => {
+    if (isFirstLoad && !initialAiCallFiredRef.current) {
+      initialAiCallFiredRef.current = true;
+      actions.setAiStatus("正在向 AI 请求实施计划...");
+      actions.resetOperationStatuses();
+      chatHook.reload();
     }
+
+    const setupEnvironment = async () => {
+      const webcontainerInstance = await initWebContainer();
+      if (webcontainerInstance) {
+        const { Terminal } = await import("xterm");
+        const term = new Terminal({
+          convertEol: true,
+          cursorBlink: true,
+          theme: { background: "#0D1117", foreground: "#e0e0e0" },
+          rows: 15,
+          fontSize: 13,
+          fontFamily: "var(--font-geist-mono), monospace",
+          lineHeight: 1.4,
+        });
+
+        actions.setWebcontainer(webcontainerInstance, project.id);
+        actions.setTerminal(term);
+        console.log("WebContainer and Terminal are ready.");
+      }
+    };
+
+    setupEnvironment();
   });
 
   useEffect(() => {
@@ -81,7 +91,6 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
       setupFlowHasRun.current = true;
 
       const setupShExists = initialFiles.some((f) => f.path === "setup.sh");
-      console.log("setup.sh exists:", setupShExists);
       // 决策点：根据 setup.sh 是否存在来决定终端的用途
       if (setupShExists) {
         // 场景一：存在 setup.sh，将其作为后台任务运行
@@ -94,23 +103,6 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
         actions.setAiStatus("项目就绪，启动交互式终端...");
         actions.startInteractiveShell();
       }
-
-      // 初始的 AI 调用逻辑
-      if (isFirstLoad && !initialAiCallFired) {
-        actions.setInitialAiCallFired();
-        actions.setAiStatus("正在初始化 AI 对话...");
-        actions.resetOperationStatuses();
-        // 稍微延迟，以确保终端的初始信息（如交互式shell提示符）能先显示
-        setTimeout(() => chatHook.reload(), 500);
-      }
     }
-  }, [
-    webcontainer,
-    terminal,
-    initialFiles,
-    isFirstLoad,
-    initialAiCallFired,
-    actions,
-    chatHook,
-  ]);
+  }, [webcontainer, terminal, initialFiles, actions]);
 }

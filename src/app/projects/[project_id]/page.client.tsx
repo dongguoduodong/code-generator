@@ -24,14 +24,16 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
   const actions = useWorkspaceStore((state) => state.actions);
   const executionError = useWorkspaceStore((state) => state.executionError);
   const webcontainer = useWorkspaceStore((state) => state.webcontainer);
-
   const storeApi = useWorkspaceStoreApi();
   const {
     enqueueInstructions,
     setGitignoreParser,
     setExecutionError,
     setAiStatus,
+    setPerformanceMetrics,
   } = actions;
+  const requestStartTime = useRef<number>(0);
+
   const processedNodeIds = useRef(new Set<string>());
 
   useEffect(() => {
@@ -40,7 +42,6 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
       const wc = storeApi.getState().webcontainer;
 
       if (wc) {
-        console.log("Project page unmounting, resetting workspace...");
         resetWorkspace();
       }
     };
@@ -65,7 +66,25 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     body: {
       projectId: props.project.id,
     },
+    onResponse: (response) => {
+      // 客户端收到第一个数据包，计算TTFT
+      const timeToFirstToken = performance.now() - requestStartTime.current;
+
+      // 从响应头读取后端发送的“预处理”耗时数据
+      const routerTime = response.headers.get("X-Performance-Router-Time");
+      const prejudgmentTime = response.headers.get(
+        "X-Performance-Prejudgment-Time"
+      );
+
+      setPerformanceMetrics({
+        timeToFirstToken,
+        routerDecisionTime: routerTime ? parseFloat(routerTime) : null,
+        preJudgmentTime: prejudgmentTime ? parseFloat(prejudgmentTime) : null,
+      });
+    },
     onFinish: () => {
+      const fullResponseTime = performance.now() - requestStartTime.current;
+      setPerformanceMetrics({ fullResponseTime });
       setAiStatus("");
       processedNodeIds.current.clear();
     },
@@ -81,7 +100,14 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
       chatRequestOptions?: ChatRequestOptions
     ) => {
       e.preventDefault();
-
+      setPerformanceMetrics({
+        lastRequestDuration: null,
+        routerDecisionTime: null,
+        preJudgmentTime: null,
+        timeToFirstToken: null,
+        fullResponseTime: null,
+      });
+      requestStartTime.current = performance.now();
       const trimmedInput = chatHook.input.trim();
       if (!trimmedInput) {
         return;
@@ -113,7 +139,6 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
 
   useEffect(() => {
     if (executionError) {
-      console.log("Execution error detected:", executionError);
       chatHook.append({
         role: "user",
         content: executionError,
