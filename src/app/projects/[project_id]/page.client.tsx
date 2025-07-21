@@ -66,6 +66,17 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     body: {
       projectId: props.project.id,
     },
+    fetch: (input, init) => {
+      requestStartTime.current = performance.now();
+      setPerformanceMetrics({
+        lastRequestDuration: null,
+        routerDecisionTime: null,
+        preJudgmentTime: null,
+        timeToFirstToken: null,
+        fullResponseTime: null,
+      });
+      return fetch(input, init);
+    },
     onResponse: (response) => {
       // 客户端收到第一个数据包，计算TTFT
       const timeToFirstToken = performance.now() - requestStartTime.current;
@@ -100,14 +111,6 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
       chatRequestOptions?: ChatRequestOptions
     ) => {
       e.preventDefault();
-      setPerformanceMetrics({
-        lastRequestDuration: null,
-        routerDecisionTime: null,
-        preJudgmentTime: null,
-        timeToFirstToken: null,
-        fullResponseTime: null,
-      });
-      requestStartTime.current = performance.now();
       const trimmedInput = chatHook.input.trim();
       if (!trimmedInput) {
         return;

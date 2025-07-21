@@ -137,7 +137,11 @@ export default function ChatPanel({ chatHook, project }: ChatPanelProps) {
             size="icon"
             aria-label="Send Message"
           >
-            <Send size={16} />
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send size={16} />
+            )}
           </Button>
         </form>
       </footer>

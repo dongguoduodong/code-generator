@@ -10,6 +10,8 @@ export type RouterDecision = {
   reason: string;
   next_prompt_input: string;
   templateId?: "react-vite-basic";
+  customInstructions?: string;
+  packageManager?: "npm" | "pnpm" | "yarn";
 };
 
 export const RouterDecisionSchema: ZodType<RouterDecision> = z.object({
@@ -31,5 +33,17 @@ export const RouterDecisionSchema: ZodType<RouterDecision> = z.object({
     .optional()
     .describe(
       "If the user's request clearly matches a known project template, provide its ID here. Otherwise, leave it empty."
+    ),
+  customInstructions: z
+    .string()
+    .optional()
+    .describe(
+      "If a template is matched, extract any additional user requirements that are NOT covered by the template's standard scope into this field. For example, if the request is 'create a beautiful blog', and a 'blog' template is matched, this field should contain 'make it beautiful'."
+    ),
+  packageManager: z
+    .enum(["npm", "pnpm", "yarn"])
+    .default("npm")
+    .describe(
+      "Detect the package manager (npm, pnpm, yarn) from the user's request. Default to 'npm' if not specified."
     ),
 });

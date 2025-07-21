@@ -7,6 +7,7 @@ import {
   PLANNER_PROMPT,
   CODER_PROMPT,
   E2E_PROMPT,
+  CUSTOMIZER_PROMPT,
 } from "@/lib/prompts";
 import { RouterDecisionSchema, type RouterDecision } from "@/lib/schemas";
 import ignore from "ignore";
@@ -215,37 +216,129 @@ export async function POST(req: NextRequest) {
         const template = getTemplateById(routerDecision.templateId);
 
         if (template) {
-          // 如果找到模板，则完全绕过 Planner LLM
-          // 立即将预定义的计划保存到数据库
-          await saveMessageInDb(supabase, {
-            projectId,
-            content: template.plan,
-            role: "assistant",
-          }).catch(console.error);
+          const encoder = new TextEncoder();
+          let fullPlanForDb = ""; // 用于最后保存到数据库
 
           const readableStream = new ReadableStream({
             async start(controller) {
-              // 1. 将模板计划按字拆分成数组
-              const chunks = template.plan.split("");
+              const push = (chunk: string) => {
+                fullPlanForDb += chunk;
+                controller.enqueue(
+                  encoder.encode(`0:"${JSON.stringify(chunk).slice(1, -1)}"\n`)
+                );
+              };
 
-              // 2. 循环遍历每个字
-              for (const chunk of chunks) {
-                // 3. 对每个字进行协议格式化
-                const escapedChunk = JSON.stringify(chunk).slice(1, -1);
-                const formattedChunk = `0:"${escapedChunk}"\n`;
-                controller.enqueue(new TextEncoder().encode(formattedChunk));
+              // --- 第 1 阶段: 瞬时发送静态模板头部 ---
+              const initialGreeting = "好的，这是为您定制的计划：\n\n";
+              push(initialGreeting);
 
-                // 4. 等待一个微小的延迟，模拟打字间隔
-                await new Promise((resolve) => setTimeout(resolve, 5)); // 5毫秒延迟
+              let stepCounter = 1;
+              for (const step of template.planBody) {
+                const numberedStep = `${stepCounter}. ${step}\n`;
+                push(numberedStep);
+                stepCounter++;
+                // 短暂延迟以确保分块发送，增强流式效果
+                await new Promise((res) => setTimeout(res, 5));
               }
+
+              // --- 第 2 阶段: 调用 AI 动态生成并流式传输定制化步骤 ---
+              if (routerDecision.customInstructions) {
+                try {
+                  const customizerPrompt = CUSTOMIZER_PROMPT.replace(
+                    "{base_plan}",
+                    template.planBody.join("\n")
+                  ).replace(
+                    "{custom_instructions}",
+                    routerDecision.customInstructions
+                  );
+
+                  const modifierResult = await streamText({
+                    model: customOpenai("gemini-2.5-pro"),
+                    prompt: customizerPrompt,
+                  });
+
+                  let lineBuffer = "";
+                  for await (const delta of modifierResult.textStream) {
+                    lineBuffer += delta;
+                    const lines = lineBuffer.split("\n");
+
+                    // 保留最后可能不完整的一行
+                    lineBuffer = lines.pop() || "";
+
+                    for (const line of lines) {
+                      if (line.startsWith("- ")) {
+                        const numberedStep = `\n${stepCounter}. ${line.substring(
+                          2
+                        )}`;
+                        push(numberedStep);
+                        stepCounter++;
+                      } else if (line.trim()) {
+                        push(` ${line}`);
+                      }
+                    }
+                  }
+                  // 处理缓冲区中剩余的最后一行
+                  if (lineBuffer.startsWith("- ")) {
+                    const numberedStep = `\n${stepCounter}. ${lineBuffer.substring(
+                      2
+                    )}`;
+                    push(numberedStep);
+                    stepCounter++;
+                  }
+                } catch (e) {
+                  console.error("Customizer Agent failed:", e);
+                  const errorMsg =
+                    "\n[系统] 抱歉，在生成自定义步骤时遇到错误。\n";
+                  push(errorMsg);
+                }
+              }
+
+              // --- 第 3 阶段: 瞬时发送静态模板尾部 ---
+              push("\n\n");
+
+              for (const step of template.planExecutionSteps) {
+                const pm = routerDecision.packageManager || "npm";
+                const commands = {
+                  npm: { install: "npm install", runDev: "npm run dev" },
+                  pnpm: { install: "pnpm install", runDev: "pnpm dev" },
+                  yarn: { install: "yarn", runDev: "yarn dev" },
+                };
+                const parameterizedStep = step
+                  .replace("{{PM_INSTALL}}", commands[pm].install)
+                  .replace("{{PM_RUN_DEV}}", commands[pm].runDev);
+                const numberedStep = `${stepCounter}. ${parameterizedStep}\n`;
+                push(numberedStep);
+                stepCounter++;
+                await new Promise((res) => setTimeout(res, 5));
+              }
+
+              push(template.planConclusion);
+
+              // --- 第 4 阶段: 保存完整消息并关闭流 ---
+              saveMessageInDb(supabase, {
+                projectId,
+                content: fullPlanForDb.trim(),
+                role: "assistant",
+              }).catch(console.error);
 
               controller.close();
             },
           });
 
-          return new Response(readableStream, {
+          const response = new Response(readableStream, {
             headers: { "Content-Type": "text/plain; charset=utf-8" },
           });
+          if (t_router)
+            response.headers.set(
+              "X-Performance-Router-Time",
+              t_router.toFixed(2)
+            );
+          if (t_preJudgment)
+            response.headers.set(
+              "X-Performance-Prejudgment-Time",
+              t_preJudgment.toFixed(2)
+            );
+          return response;
         } else {
           console.warn(
             `Router returned invalid templateId: ${routerDecision.templateId}`

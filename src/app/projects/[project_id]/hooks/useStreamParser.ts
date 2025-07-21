@@ -1,6 +1,8 @@
 import { FileOperationType, RenderNode } from "@/types/ai";
 import { useMemo } from "react";
+import { simpleHash } from "../utils/parse";
 
+ 
 export function useStreamParser(
   rawContent: string,
   messageId: string
@@ -28,7 +30,7 @@ export function useStreamParser(
           lastNode.content += textBeforeTag;
         } else {
           nodes.push({
-            id: `${prefix}-md-${nodes.length}`,
+            id: `${prefix}-md-${simpleHash(textBeforeTag)}`,
             type: "markdown",
             content: textBeforeTag,
           });
@@ -56,7 +58,7 @@ export function useStreamParser(
             }
           }
           nodes.push({
-            id: `${prefix}-file-${nodes.length}`,
+            id: `${prefix}-file-${action}-${path}`,
             type: "file",
             path,
             action,
@@ -77,7 +79,7 @@ export function useStreamParser(
         const selfClosingMatch = tagContent.match(/^<terminal.*?\/>/);
         if (commandMatch && selfClosingMatch) {
           nodes.push({
-            id: `${prefix}-terminal-${nodes.length}`,
+            id: `${prefix}-terminal-${simpleHash(commandMatch[2])}`,
             type: "terminal",
             command: commandMatch[2],
             background: !!backgroundMatch,
@@ -96,7 +98,7 @@ export function useStreamParser(
         lastNode.content += remainingText;
       } else {
         nodes.push({
-          id: `md-${nodes.length}`,
+          id: `${prefix}-md-final-${simpleHash(remainingText)}`,
           type: "markdown",
           content: remainingText,
         });

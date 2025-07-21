@@ -63,10 +63,10 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
   });
 
   useEffect(() => {
-    if (!webcontainer || hasHydrated.current) return;
+    if (!webcontainer || !terminal || hasHydrated.current) return;
     hasHydrated.current = true;
 
-    const hydrate = async () => {
+    const hydrateAndSetup = async () => {
       actions.setAiStatus("正在同步初始文件...");
       const fileTree = convertInitialFilesToFileSystem(initialFiles);
       actions.setFileSystem(fileTree);
@@ -82,27 +82,23 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
           actions.setActiveFile(firstFile.path, firstFile.content);
         }
       }
-    };
-    hydrate();
-  }, [webcontainer, initialFiles, writeFile, actions]);
 
-  useEffect(() => {
-    if (webcontainer && terminal && !setupFlowHasRun.current) {
-      setupFlowHasRun.current = true;
+      if (!setupFlowHasRun.current) {
+        setupFlowHasRun.current = true;
+        const setupShExists = initialFiles.some((f) => f.path === "setup.sh");
 
-      const setupShExists = initialFiles.some((f) => f.path === "setup.sh");
-      // 决策点：根据 setup.sh 是否存在来决定终端的用途
-      if (setupShExists) {
-        // 场景一：存在 setup.sh，将其作为后台任务运行
-        actions.setAiStatus("检测到 setup.sh，正在作为后台任务执行...");
-        toast.info("正在执行启动脚本 setup.sh...");
-        actions.runBackgroundTask("sh", ["setup.sh"]);
-        actions.setAiStatus("启动脚本正在后台运行。终端将显示其日志。");
-      } else {
-        // 场景二：不存在 setup.sh，直接为用户提供一个可交互的 Shell
-        actions.setAiStatus("项目就绪，启动交互式终端...");
-        actions.startInteractiveShell();
+        if (setupShExists) {
+          actions.setAiStatus("检测到 setup.sh，正在作为后台任务执行...");
+          toast.info("正在执行启动脚本 setup.sh...");
+          actions.runBackgroundTask("sh", ["setup.sh"]);
+          actions.setAiStatus("启动脚本正在后台运行。终端将显示其日志。");
+        } else {
+          actions.setAiStatus("项目就绪，启动交互式终端...");
+          actions.startInteractiveShell();
+        }
       }
-    }
-  }, [webcontainer, terminal, initialFiles, actions]);
+    };
+
+    hydrateAndSetup();
+  }, [webcontainer, terminal, initialFiles, writeFile, actions]);
 }
