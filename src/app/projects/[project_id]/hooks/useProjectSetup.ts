@@ -93,7 +93,6 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
           actions.runBackgroundTask("sh", ["setup.sh"]);
           actions.setAiStatus("启动脚本正在后台运行。终端将显示其日志。");
         } else {
-          actions.setAiStatus("项目就绪，启动交互式终端...");
           actions.startInteractiveShell();
         }
       }

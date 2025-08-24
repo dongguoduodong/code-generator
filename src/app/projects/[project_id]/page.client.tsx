@@ -96,14 +96,11 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     onFinish: () => {
       const fullResponseTime = performance.now() - requestStartTime.current;
       setPerformanceMetrics({ fullResponseTime });
-      setAiStatus("");
-      processedNodeIds.current.clear();
     },
     onError: (err) => setAiStatus(`出现错误: ${err.message}`),
   });
 
   const { status } = chatHook;
-  const prevIsLoading = useRef(false);
 
   const handleSubmitWithContext = useMemoizedFn(
     async (
@@ -111,15 +108,20 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
       chatRequestOptions?: ChatRequestOptions
     ) => {
       e.preventDefault();
+      processedNodeIds.current.clear()
+      setAiStatus("AI 正在思考中...")
       const trimmedInput = chatHook.input.trim();
       if (!trimmedInput) {
-        return;
+        // 如果输入为空，重置状态
+        setAiStatus("AI 已准备就绪。")
+        return
       }
 
       chatHook.setInput(trimmedInput);
 
       if (!webcontainer) {
         toast.error("开发容器尚未就绪，请稍候。");
+        setAiStatus("错误：开发容器不可用。");
         return;
       }
 
@@ -166,32 +168,33 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     // 这可以保证我们只处理实时的AI响应，而忽略历史消息。
 
     const isStreaming = status === "submitted" || status === "streaming";
-    const justFinishedStreaming = prevIsLoading.current && !isStreaming;
-    if (isStreaming || justFinishedStreaming) {
+     const isProcessingCurrentStream =
+       lastAssistantMessage &&
+       chatHook.messages.length > 0 &&
+       chatHook.messages[chatHook.messages.length - 1].id ===
+         lastAssistantMessage.id
+    if (isStreaming && isProcessingCurrentStream) {
       // 第 1 步：纯粹地过滤出所有准备就绪的节点，不过早修改任何状态。
       const allReadyNodes = structuredResponse.filter((node: RenderNode) => {
         const isReady =
-          node.type === "terminal" || (node.type === "file" && node.isClosed);
-        return isReady;
-      });
+          node.type === "terminal" || (node.type === "file" && node.isClosed)
+        return isReady
+      })
 
       // 第 2 步：从准备就绪的节点中，筛选出那些我们尚未“拉黑”的。
       const newNodesToExecute = allReadyNodes.filter(
         (node) => !processedNodeIds.current.has(node.id)
-      );
+      )
 
       // 第 3 步：如果确实有新的、需要执行的指令...
       if (newNodesToExecute.length > 0) {
         newNodesToExecute.forEach((node) =>
           processedNodeIds.current.add(node.id)
-        );
-        enqueueInstructions(newNodesToExecute, project.id);
+        )
+        enqueueInstructions(newNodesToExecute, project.id)
       }
     }
-
-    // 在 effect 的最后，更新 prevIsLoading 的值为当前值，供下一次渲染使用
-    prevIsLoading.current = isStreaming;
-  }, [structuredResponse, status, enqueueInstructions]);
+  }, [structuredResponse, status, enqueueInstructions, project.id, lastAssistantMessage, chatHook.messages]);
 
   const handleFixDevError = useMemoizedFn(async (errorLog: string) => {
     if (!webcontainer || !gitignoreParser) {
