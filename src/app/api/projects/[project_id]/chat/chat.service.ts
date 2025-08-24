@@ -183,21 +183,16 @@ export async function createAiStream(
   })
 }
 
-const streamTextCharacterByCharacter = async (
+const streamTextChunk = (
   text: string,
   controller: ReadableStreamDefaultController<Uint8Array>,
   encoder: TextEncoder
-): Promise<void> => {
-  const characters = text.split("")
-  for (const char of characters) {
-    // 遵循 Vercel AI SDK 的流格式: 0:"<json_escaped_string_chunk>"\n
-    const formattedChunk = `0:"${JSON.stringify(char).slice(1, -1)}"\n`
-    controller.enqueue(encoder.encode(formattedChunk))
-    // 模拟打字的微小延迟，加入随机性使其更自然
-    await new Promise((res) => setTimeout(res, 4 + Math.random() * 8))
-  }
+): void => {
+  if (!text) return
+  // 遵循 Vercel AI SDK 的流格式: 0:"<json_escaped_string_chunk>"\n
+  const formattedChunk = `0:"${JSON.stringify(text).slice(1, -1)}"\n`
+  controller.enqueue(encoder.encode(formattedChunk))
 }
-
 /**
  * 根据模板ID生成一个复合流式响应。
  * 该响应结合了静态模板内容和动态AI生成内容。
@@ -230,16 +225,16 @@ export function createTemplateStreamResponse(
        */
       const streamAndAccumulate = async (text: string): Promise<void> => {
         fullPlanForDb += text
-        await streamTextCharacterByCharacter(text, controller, encoder)
+        streamTextChunk(text, controller, encoder)
       }
 
       let stepCounter = 1
 
       try {
         // 阶段1: 发送模板头部
-        await streamAndAccumulate("好的，这是为您定制的计划：\n\n")
+        streamAndAccumulate("好的，这是为您定制的计划：\n\n")
         for (const step of template.planBody) {
-          await streamAndAccumulate(`${stepCounter++}. ${step}\n`)
+          streamAndAccumulate(`${stepCounter++}. ${step}\n`)
         }
 
         // 阶段2: AI动态生成定制化步骤
@@ -260,7 +255,7 @@ export function createTemplateStreamResponse(
 
             // 逐 token 处理 AI 的流式响应，以获得最佳流畅度
             for await (const delta of modifierResult.textStream) {
-              await streamAndAccumulate(delta)
+              streamAndAccumulate(delta)
             }
           } catch (e: unknown) {
             console.error("Customizer Agent 失败:", e)

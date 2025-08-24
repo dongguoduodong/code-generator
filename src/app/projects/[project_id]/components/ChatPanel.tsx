@@ -16,9 +16,14 @@ import { findLastIndex } from "lodash-es"
 interface ChatPanelProps {
   chatHook: UseChatHelpers
   project: Pick<Project, "name">
+  onOpenFile: (path: string) => void
 }
 
-export default function ChatPanel({ chatHook, project }: ChatPanelProps) {
+export default function ChatPanel({
+  chatHook,
+  project,
+  onOpenFile,
+}: ChatPanelProps) {
   const { messages, input, handleInputChange, handleSubmit, status } = chatHook
   const isLoading = status === "submitted" || status === "streaming"
 
@@ -90,7 +95,7 @@ export default function ChatPanel({ chatHook, project }: ChatPanelProps) {
                 )}
                 <div
                   className={cn(
-                    "p-3 rounded-lg max-w-sm prose prose-sm prose-invert",
+                    "p-3 rounded-lg max-w-sm prose prose-sm prose-invert w-max-full",
                     m.role === "user"
                       ? "bg-blue-600"
                       : "bg-[#161b22] text-white"
@@ -102,6 +107,7 @@ export default function ChatPanel({ chatHook, project }: ChatPanelProps) {
                       content={m.content}
                       statuses={operationStatuses}
                       isLive={isEffectivelyLive}
+                      onOpenFile={onOpenFile}
                     />
                   ) : (
                     <Markdown remarkPlugins={[remarkGfm]}>{m.content}</Markdown>
