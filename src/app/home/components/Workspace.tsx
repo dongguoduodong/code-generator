@@ -56,7 +56,6 @@ export function Workspace() {
 
       if (!trimmedPrompt) return;
       const toastId = toast.loading("正在为您创建新项目，请稍候...");
-
       try {
         const response = await apiClient("/api/projects", {
           method: "POST",
@@ -67,7 +66,7 @@ export function Workspace() {
         if (!response.ok) {
           const errorData = await response
             .json()
-            .catch(() => ({ message: "未知错误" }));
+            .catch((err) => (err ? err : { message: "项目创建请求失败" }));
           throw new Error(errorData.message || "项目创建请求失败");
         }
 
