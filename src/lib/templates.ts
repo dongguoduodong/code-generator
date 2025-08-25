@@ -15,6 +15,7 @@ export const TEMPLATES: Template[] = [
     name: "React + Vite (基础版)",
     description: "一个标准的、使用NPM的React + Vite项目。",
     planBody: [
+      "### 基础项目骨架",
       "首先，我会创建 `.gitignore` 文件，这是至关重要的一步，可以避免将 `node_modules` 等不必要的文件提交到版本控制中。",
       "接下来，我会生成 `package.json`，其中定义了项目所需的依赖，如 `react`, `react-dom` 和开发依赖 `vite`。",
       "然后，我会创建 Vite 的核心配置文件 `vite.config.js`。",
