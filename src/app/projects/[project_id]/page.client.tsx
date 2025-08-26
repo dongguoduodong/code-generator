@@ -111,6 +111,7 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
       processedNodeIds.current.clear()
       setAiStatus("AI 正在思考中...")
       const trimmedInput = chatHook.input.trim()
+
       if (!trimmedInput) {
         // 如果输入为空，重置状态
         setAiStatus("AI 已准备就绪。")
@@ -118,7 +119,6 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
       }
 
       chatHook.setInput(trimmedInput)
-
       if (!webcontainer) {
         toast.error("开发容器尚未就绪，请稍候。")
         setAiStatus("错误：开发容器不可用。")

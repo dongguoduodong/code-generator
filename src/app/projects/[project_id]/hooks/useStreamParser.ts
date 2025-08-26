@@ -10,6 +10,8 @@ export function useStreamParser(
     if (!rawContent) return []
     const prefix = messageId
     let content = rawContent.trim()
+
+    // 移除可能存在的 ```xml ... ``` markdown 包装
     const codeBlockMatch = content.match(/^```xml\n([\s\S]*)\n```$/)
     if (codeBlockMatch) {
       content = codeBlockMatch[1]
@@ -23,16 +25,11 @@ export function useStreamParser(
     while ((match = tagStartRegex.exec(content)) !== null) {
       const textBeforeTag = content.substring(lastIndex, match.index)
       if (textBeforeTag.trim()) {
-        const lastNode = nodes[nodes.length - 1]
-        if (lastNode && lastNode.type === "markdown") {
-          lastNode.content += textBeforeTag
-        } else {
-          nodes.push({
-            id: `${prefix}-md-${simpleHash(textBeforeTag)}`,
-            type: "markdown",
-            content: textBeforeTag,
-          })
-        }
+        nodes.push({
+          id: `${prefix}-md-${nodes.length}`,
+          type: "markdown",
+          content: textBeforeTag,
+        })
       }
 
       const tagContent = content.substring(match.index)
@@ -44,7 +41,6 @@ export function useStreamParser(
         if (pathMatch && actionMatch) {
           const path = pathMatch[2]
           const action = actionMatch[2] as FileOperationType
-
           const selfClosingMatch = tagContent.match(/^<file.*?\/>/)
           const closingTagMatch = tagContent.match(/<\/file>/)
 
@@ -78,7 +74,8 @@ export function useStreamParser(
         } else {
           lastIndex = content.length
         }
-      } else if (match[1] === "terminal") {
+      }
+      else if (match[1] === "terminal") {
         const commandMatch = tagContent.match(/command=(['"])(.*?)\1/)
         const selfClosingMatch = tagContent.match(/^<terminal.*?\/>/)
 
@@ -98,13 +95,16 @@ export function useStreamParser(
     }
 
     const remainingText = content.substring(lastIndex)
-    if (remainingText.trim()) {
-      const lastNode = nodes[nodes.length - 1]
+    if (remainingText) {
+      const lastNode = nodes.length > 0 ? nodes[nodes.length - 1] : null
+
+      // 如果最后一个节点是Markdown，说明剩余文本是该节点内容的延续
       if (lastNode && lastNode.type === "markdown") {
         lastNode.content += remainingText
       } else {
+        // 否则，这是一个新的Markdown节点
         nodes.push({
-          id: `${prefix}-md-final-${simpleHash(remainingText)}`,
+          id: `${prefix}-md-final-${nodes.length}`,
           type: "markdown",
           content: remainingText,
         })

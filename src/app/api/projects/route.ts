@@ -26,10 +26,9 @@ export const POST = async (req: NextRequest) => {
   if (!prompt) {
     return new NextResponse("Prompt is required", { status: 400 })
   }
-
   try {
     const { object: metadata } = await generateObject({
-      model: customOpenai("gemini-2.5-flash"),
+      model: customOpenai("gemini-2.5-flash-preview-05-20"),
       schema: z.object({
         title: z.string().describe("A short, catchy title for the project."),
         description: z

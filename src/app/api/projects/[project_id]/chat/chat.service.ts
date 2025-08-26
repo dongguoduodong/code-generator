@@ -144,7 +144,7 @@ export async function determineNextStep(
 
   const routerStartTime = performance.now()
   const { object: decision } = await generateObject<RouterDecision>({
-    model: customOpenai("gemini-2.5-flash"),
+    model: customOpenai("gemini-2.5-flash-preview-05-20"),
     system: routerSystemPrompt,
     prompt: `User's latest message: "${messages[messages.length - 1].content}"`,
     schema: RouterDecisionSchema,
@@ -249,7 +249,7 @@ export function createTemplateStreamResponse(
             )
 
             const modifierResult = await streamText({
-              model: customOpenai("gemini-1.5-pro-latest"),
+              model: customOpenai("gemini-2.5-pro"),
               prompt: customizerPrompt,
             })
 
@@ -345,7 +345,7 @@ export async function executeAgenticWorkflow(
   context: ChatContext
 ): Promise<Response> {
   const { decision, performance } = await determineNextStep(context)
-
+  console.log("Router Decision:", decision)
   let response: Response
 
   if (decision.templateId) {

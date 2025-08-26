@@ -26,7 +26,7 @@ export default function ChatPanel({
 }: ChatPanelProps) {
   const { messages, input, handleInputChange, handleSubmit, status } = chatHook
   const isLoading = status === "submitted" || status === "streaming"
-
+  console.log("messages", messages)
   const aiStatus = useWorkspaceStore((state) => state.aiStatus)
   const { operationStatuses, isProcessing: isProcessingQueue } =
     useWorkspaceStore((state) => ({
@@ -95,7 +95,7 @@ export default function ChatPanel({
                 )}
                 <div
                   className={cn(
-                    "p-3 rounded-lg max-w-sm prose prose-sm prose-invert w-max-full",
+                    "p-3 rounded-lg max-w-sm prose prose-sm prose-invert w-max-full overflow-x-scroll",
                     m.role === "user"
                       ? "bg-blue-600"
                       : "bg-[#161b22] text-white"

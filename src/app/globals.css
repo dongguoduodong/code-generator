@@ -149,10 +149,46 @@
   :where(code):not(:where([class~="not-prose"] *))::after {
     content: "" !important;
   }
+ h2 {
+    @apply text-lg font-semibold text-neutral-100 border-b border-neutral-700 pb-2 mb-4 mt-6;
+  }
+
+  h3 {
+    @apply text-base font-semibold text-neutral-200 mb-3 mt-4;
+  }
+
+  /* -- ✨ 列表样式修复与优化 -- */
+  ol {
+    /* 强制使用十进制数字作为列表标记 */
+    @apply list-decimal; 
+  }
+  
+  ul {
+      /* 确保无序列表也有符号 */
+      @apply list-disc;
+  }
+
+  ol, ul {
+    /* 将列表标记放在内容外部，这是标准排版 */
+    @apply list-outside pl-5 my-4; 
+  }
+
+  li {
+    @apply mb-2 pl-2; /* 为列表项本身添加一些左内边距，使其与编号分开 */
+  }
+
+  /* -- 其他元素间距调整 -- */
+  p {
+    @apply my-2;
+  }
 }
 
 /* 对于行内代码 `like this` 的样式 */
 .prose .prose-invert code {
   @apply bg-blue-500/10 text-blue-300 px-1.5 py-0.5 rounded-md border border-blue-500/20;
   font-size: 0.9em;
+}
+
+.live-markdown-container .prose.prose-invert {
+   /* You can add specific overrides for live rendering if needed */
 }

@@ -12,6 +12,13 @@ import {
 } from "@/types/ai"
 import { cn } from "@/lib/utils"
 import { ChevronDown } from "lucide-react"
+import { useTypewriter } from "../hooks/useTypewriter"
+
+export const LiveMarkdownRenderer = ({ content }: { content: string }) => {
+  const typedText = useTypewriter(content)
+
+  return <Markdown remarkPlugins={[remarkGfm]}>{typedText}</Markdown>
+}
 
 interface StructuredResponseProps {
   nodes: RenderNode[]
@@ -28,7 +35,7 @@ export default function StructuredResponse({
 }: StructuredResponseProps) {
   return (
     <div>
-      {nodes.map((node) => {
+      {nodes.map((node, index) => {
         let status: OperationStatusType
 
         if (!isLive) {
@@ -41,10 +48,19 @@ export default function StructuredResponse({
             if (!node.content.trim()) {
               return null
             }
+            const isLastNode = index === nodes.length - 1
+            if (isLive && isLastNode) {
+              return (
+                <LiveMarkdownRenderer key={node.id} content={node.content} />
+              )
+            }
             return (
-              <Markdown key={node.id} remarkPlugins={[remarkGfm]}>
-                {node.content}
-              </Markdown>
+              <div
+                key={node.id}
+                className='prose prose-sm prose-invert max-w-full'
+              >
+                <Markdown remarkPlugins={[remarkGfm]}>{node.content}</Markdown>
+              </div>
             )
 
           case "file":
@@ -66,7 +82,10 @@ export default function StructuredResponse({
                     </span>
                   </div>
                 ) : (
-                  <details className='border border-neutral-700/80 rounded-md'>
+                  <details
+                    className='border border-neutral-700/80 rounded-md'
+                    open
+                  >
                     <summary className='flex items-center gap-2 text-sm font-semibold text-left w-full p-2 rounded-md transition-colors cursor-pointer hover:bg-neutral-700/50 list-none group'>
                       <OperationStatus status={status} />
                       <span
