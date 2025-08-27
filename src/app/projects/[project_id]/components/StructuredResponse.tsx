@@ -51,7 +51,12 @@ export default function StructuredResponse({
             const isLastNode = index === nodes.length - 1
             if (isLive && isLastNode) {
               return (
-                <LiveMarkdownRenderer key={node.id} content={node.content} />
+                <div
+                  key={node.id}
+                  className='prose prose-sm prose-invert max-w-full'
+                >
+                  <LiveMarkdownRenderer content={node.content} />
+                </div>
               )
             }
             return (
@@ -83,8 +88,7 @@ export default function StructuredResponse({
                   </div>
                 ) : (
                   <details
-                    className='border border-neutral-700/80 rounded-md'
-                    open
+                      className='border border-neutral-700/80 rounded-md'
                   >
                     <summary className='flex items-center gap-2 text-sm font-semibold text-left w-full p-2 rounded-md transition-colors cursor-pointer hover:bg-neutral-700/50 list-none group'>
                       <OperationStatus status={status} />

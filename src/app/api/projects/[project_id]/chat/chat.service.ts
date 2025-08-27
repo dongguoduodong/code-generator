@@ -144,7 +144,7 @@ export async function determineNextStep(
 
   const routerStartTime = performance.now()
   const { object: decision } = await generateObject<RouterDecision>({
-    model: customOpenai("gemini-2.5-flash-preview-05-20"),
+    model: customOpenai("claude-3-5-haiku-20241022"),
     system: routerSystemPrompt,
     prompt: `User's latest message: "${messages[messages.length - 1].content}"`,
     schema: RouterDecisionSchema,
@@ -183,134 +183,6 @@ export async function createAiStream(
   })
 }
 
-const streamTextChunk = (
-  text: string,
-  controller: ReadableStreamDefaultController<Uint8Array>,
-  encoder: TextEncoder
-): void => {
-  if (!text) return
-  // 遵循 Vercel AI SDK 的流格式: 0:"<json_escaped_string_chunk>"\n
-  const formattedChunk = `0:"${JSON.stringify(text).slice(1, -1)}"\n`
-  controller.enqueue(encoder.encode(formattedChunk))
-}
-/**
- * 根据模板ID生成一个复合流式响应。
- * 该响应结合了静态模板内容和动态AI生成内容。
- * @param context - 聊天上下文
- * @param routerDecision - 路由决策
- * @returns 一个 Response 对象
- */
-export function createTemplateStreamResponse(
-  context: ChatContext,
-  routerDecision: RouterDecision
-): Response {
-  const template = getTemplateById(routerDecision.templateId!)
-  if (!template) {
-    return new NextResponse(
-      `错误: 未找到 ID 为 '${routerDecision.templateId}' 的模板。`,
-      { status: 500 }
-    )
-  }
-
-  const encoder = new TextEncoder()
-
-  const readableStream = new ReadableStream<Uint8Array>({
-    async start(controller: ReadableStreamDefaultController<Uint8Array>) {
-      // 用于最终保存到数据库的完整消息内容
-      let fullPlanForDb = ""
-
-      /**
-       * 包装函数：将文本累加到 fullPlanForDb 并以打字机效果流式传输
-       * @param text 要处理的文本
-       */
-      const streamAndAccumulate = async (text: string): Promise<void> => {
-        fullPlanForDb += text
-        streamTextChunk(text, controller, encoder)
-      }
-
-      let stepCounter = 1
-
-      try {
-        // 阶段1: 发送模板头部
-        streamAndAccumulate("好的，这是为您定制的计划：\n\n")
-        for (const step of template.planBody) {
-          streamAndAccumulate(`${stepCounter++}. ${step}\n`)
-        }
-
-        // 阶段2: AI动态生成定制化步骤
-        if (routerDecision.customInstructions) {
-          try {
-            const customizerPrompt = CUSTOMIZER_PROMPT.replace(
-              "{base_plan}",
-              template.planBody.join("\n")
-            ).replace(
-              "{custom_instructions}",
-              routerDecision.customInstructions
-            )
-
-            const modifierResult = await streamText({
-              model: customOpenai("gemini-2.5-pro"),
-              prompt: customizerPrompt,
-            })
-
-            // 逐 token 处理 AI 的流式响应，以获得最佳流畅度
-            for await (const delta of modifierResult.textStream) {
-              streamAndAccumulate(delta)
-            }
-          } catch (e: unknown) {
-            console.error("Customizer Agent 失败:", e)
-            const errorMessage = e instanceof Error ? e.message : String(e)
-            await streamAndAccumulate(
-              `\n[系统] 抱歉，在生成自定义步骤时遇到错误: ${errorMessage}\n`
-            )
-          }
-        }
-
-        // 阶段3: 发送模板尾部
-        await streamAndAccumulate("\n\n")
-        const pm = routerDecision.packageManager || "npm"
-        const commands = {
-          npm: { install: "npm install", runDev: "npm run dev" },
-          pnpm: { install: "pnpm install", runDev: "pnpm dev" },
-          yarn: { install: "yarn", runDev: "yarn dev" },
-        }
-        for (const step of template.planExecutionSteps) {
-          const parameterizedStep = step
-            .replace("{{PM_INSTALL}}", commands[pm].install)
-            .replace("{{PM_RUN_DEV}}", commands[pm].runDev)
-          await streamAndAccumulate(`${stepCounter++}. ${parameterizedStep}\n`)
-        }
-
-        await streamAndAccumulate(template.planConclusion)
-      } catch (error) {
-        // 捕获流处理过程中的任何意外错误
-        console.error("创建模板流时发生严重错误:", error)
-        // 尝试向客户端发送一条错误信息
-        try {
-          await streamAndAccumulate(
-            "\n\n[系统] 抱歉，生成响应时发生意外错误，请重试。"
-          )
-        } catch (e) {
-          console.error("无法向客户端发送流错误信息:", e)
-        }
-      } finally {
-        // 阶段4: 保存完整消息并关闭流
-        saveMessageInDb(context.supabase, {
-          projectId: context.projectId,
-          content: fullPlanForDb.trim(),
-          role: "assistant",
-        }).catch(console.error)
-
-        controller.close()
-      }
-    },
-  })
-
-  return new Response(readableStream, {
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
-  })
-}
-
 /**
  * 执行端到端（End-to-End）工作流。
  * @param context - 聊天上下文
@@ -346,23 +218,67 @@ export async function executeAgenticWorkflow(
 ): Promise<Response> {
   const { decision, performance } = await determineNextStep(context)
   console.log("Router Decision:", decision)
-  let response: Response
+  let streamResult: StreamTextResult<never, never>
 
-  if (decision.templateId) {
-    response = createTemplateStreamResponse(context, decision)
-  } else {
-    let streamResult: StreamTextResult<never, never> | null = null
-    const model = customOpenai("gemini-2.5-pro")
-    const systemPrompt =
-      decision.decision === "PLAN" ? PLANNER_PROMPT : CODER_PROMPT
+  if (decision.templateId && decision.decision === "PLAN") {
+    const template = getTemplateById(decision.templateId)
+    if (template) {
+      const pm = decision.packageManager || "npm"
+      const installCommand =
+        pm === "pnpm" ? "pnpm install" : pm === "yarn" ? "yarn" : "npm install"
+      const devCommand =
+        pm === "pnpm" ? "pnpm dev" : pm === "yarn" ? "yarn dev" : "npm run dev"
+
+      const processedPlanBody = template.planBody.join("\n")
+      const processedExecutionSteps = template.planExecutionSteps
+        .join("\n")
+        .replace(/\{\{PM_INSTALL\}\}/g, installCommand)
+        .replace(/\{\{PM_RUN_DEV\}\}/g, devCommand)
+
+      const basePlan = `${processedPlanBody}\n${processedExecutionSteps}`
+      const systemPrompt = CUSTOMIZER_PROMPT.replace(
+        "{base_plan}",
+        basePlan
+      ).replace(
+        "{custom_instructions}",
+        decision.customInstructions || "Implement the base template."
+      )
+
+      streamResult = await createAiStream(
+        context,
+        customOpenai("gemini-2.5-pro"),
+        systemPrompt,
+        decision.next_prompt_input
+      )
+    } else {
+      // 容错：模板未找到，降级为 Planner
+      console.warn(
+        `Template '${decision.templateId}' not found. Falling back to Planner Agent.`
+      )
+      streamResult = await createAiStream(
+        context,
+        customOpenai("gemini-2.5-pro"),
+        PLANNER_PROMPT,
+        decision.next_prompt_input
+      )
+    }
+  } else if (decision.decision === "PLAN") {
     streamResult = await createAiStream(
       context,
-      model,
-      systemPrompt,
+      customOpenai("gemini-2.5-pro"),
+      PLANNER_PROMPT,
       decision.next_prompt_input
     )
-    response = streamResult.toDataStreamResponse()
+  } else {
+    streamResult = await createAiStream(
+      context,
+      customOpenai("gemini-2.5-pro"),
+      CODER_PROMPT,
+      decision.next_prompt_input
+    )
   }
+
+  const response = streamResult.toDataStreamResponse()
 
   if (performance.routerTime) {
     response.headers.set(
@@ -380,11 +296,6 @@ export async function executeAgenticWorkflow(
   return response
 }
 
-/**
- * 从请求中构建聊天上下文对象。
- * @param req - NextRequest
- * @returns 聊天上下文
- */
 export async function buildChatContext(req: NextRequest): Promise<ChatContext> {
   const { user, supabase } = await authenticateRoute()
   const {
@@ -403,7 +314,6 @@ export async function buildChatContext(req: NextRequest): Promise<ChatContext> {
     })
   }
 
-  // 异步保存用户消息 (仅在非首次消息时)
   const lastMessage = messages[messages.length - 1]
   if (lastMessage.role === "user" && messages.length > 1) {
     saveMessageInDb(supabase, {

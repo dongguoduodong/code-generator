@@ -12,6 +12,7 @@ import { useWorkspaceStore } from "@/stores/WorkspaceStoreProvider"
 import type { UseChatHelpers } from "@ai-sdk/react"
 import type { Project } from "@/types/database"
 import { findLastIndex } from "lodash-es"
+import { LoadingPlaceholder } from "./LoadingPlaceholder"
 
 interface ChatPanelProps {
   chatHook: UseChatHelpers
@@ -50,6 +51,11 @@ export default function ChatPanel({
     messages,
     (m) => m.role === "assistant"
   )
+    const lastMessage = messages[messages.length - 1]
+    const isAiReplying = isLoading && lastMessage?.role === "assistant"
+
+    const showLoadingPlaceholder =
+      isAiReplying && lastMessage.content.trim() === ""
 
   return (
     <aside className='w-full md:w-1/3 flex flex-col border-r border-neutral-800 h-screen bg-[#0d1117] text-neutral-300'>
@@ -80,6 +86,10 @@ export default function ChatPanel({
               isLastAssistantMessage && isProcessingQueue
 
             const isEffectivelyLive = isLiveStreaming || isPostStreamProcessing
+            if (m.content.trim() === "") {
+              return null
+            }
+
             return (
               <div
                 key={messageKey}
@@ -95,7 +105,8 @@ export default function ChatPanel({
                 )}
                 <div
                   className={cn(
-                    "p-3 rounded-lg max-w-sm prose prose-sm prose-invert w-max-full overflow-x-scroll",
+                    "p-3 rounded-lg prose prose-sm prose-invert overflow-x-auto",
+                    "max-w-9/10",
                     m.role === "user"
                       ? "bg-blue-600"
                       : "bg-[#161b22] text-white"
@@ -121,18 +132,11 @@ export default function ChatPanel({
               </div>
             )
           })}
-          {isLoading &&
-            messages.length > 0 &&
-            messages[messages.length - 1]?.role === "user" && (
-              <div className='flex items-start gap-3'>
-                <div className='w-8 h-8 rounded-full bg-neutral-700 flex items-center justify-center flex-shrink-0'>
-                  <Bot size={18} />
-                </div>
-                <div className='p-3 rounded-lg bg-[#161b22] flex items-center'>
-                  <Loader2 className='w-5 h-5 animate-spin text-neutral-400' />
-                </div>
-              </div>
-            )}
+          {isLoading && messages[messages.length - 1]?.role === "user" && (
+            <LoadingPlaceholder />
+          )}
+
+          {showLoadingPlaceholder && <LoadingPlaceholder />}
         </div>
       </div>
       <footer className='p-4 border-t border-neutral-800 shrink-0'>

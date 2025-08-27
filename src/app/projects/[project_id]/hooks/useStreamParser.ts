@@ -8,8 +8,18 @@ export function useStreamParser(
 ): RenderNode[] {
   const structuredResponse = useMemo(() => {
     if (!rawContent) return []
+    let content = rawContent.trim() 
+
+    if (content.startsWith("<>") && content.endsWith("</>")) {
+      content = content.slice(2, -3).trim()
+    } else if (content.startsWith("<>")) {
+      content = content.substring(2).trim()
+    } else if (content.endsWith("</>")) {
+      content = content.slice(0, -3).trim()
+    }
+
+
     const prefix = messageId
-    let content = rawContent.trim()
 
     // 移除可能存在的 ```xml ... ``` markdown 包装
     const codeBlockMatch = content.match(/^```xml\n([\s\S]*)\n```$/)

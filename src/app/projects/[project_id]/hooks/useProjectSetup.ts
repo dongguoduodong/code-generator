@@ -7,7 +7,7 @@ interface UseProjectSetupProps {
 
 import { useEffect, useRef } from "react"
 import { useMount } from "ahooks"
-import { useWorkspaceStore } from "@/stores/WorkspaceStoreProvider"
+import { useWorkspaceStore, useWorkspaceStoreApi } from "@/stores/WorkspaceStoreProvider"
 import { useWebContainer } from "./useWebContainer"
 import { convertInitialFilesToFileSystem } from "../utils/fileSystem"
 import { type ProjectClientPageProps } from "@/types/ui"
@@ -30,7 +30,7 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
   const { initWebContainer, writeFile } = useWebContainer(project.id)
   const hasHydrated = useRef(false)
   const setupFlowHasRun = useRef(false)
-
+  const storeApi = useWorkspaceStoreApi()
   useMount(() => {
     if (isFirstLoad && !initialAiCallFiredRef.current) {
       initialAiCallFiredRef.current = true
@@ -40,6 +40,15 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
     }
 
     const setupEnvironment = async () => {
+      const { webcontainer: existingWc, actions: storeActions } =
+        storeApi.getState()
+      if (existingWc) {
+        console.warn(
+          "Detected a lingering WebContainer instance. Forcibly tearing down before proceeding."
+        )
+        await existingWc.teardown()
+        storeActions.resetWorkspace()
+      }
       const webcontainerInstance = await initWebContainer()
       if (webcontainerInstance) {
         const { Terminal } = await import("xterm")

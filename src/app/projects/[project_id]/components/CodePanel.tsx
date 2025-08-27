@@ -185,7 +185,7 @@ export function CodePanel({
                       AI 检测到问题: {error.log.split("\n")[0]}
                     </p>
                   </div>
-                  <div className="flex-shrink-0 flex gap-2">
+                  <div className="flex gap-2">
                     <Button
                       size="sm"
                       variant="outline"
