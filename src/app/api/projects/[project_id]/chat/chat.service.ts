@@ -20,6 +20,8 @@ import {
   CODER_PROMPT,
   E2E_PROMPT,
   CUSTOMIZER_PROMPT,
+  FileIdentificationSchema,
+  FILE_IDENTIFIER_PROMPT,
 } from "@/lib/prompts"
 import { RouterDecisionSchema, type RouterDecision } from "@/lib/schemas"
 import { SupabaseClient } from "@/types/database"
@@ -207,6 +209,53 @@ export async function executeEndToEndWorkflow(
 
   return streamResult.toDataStreamResponse()
 }
+async function buildModificationContext(
+  plan: string,
+  fileList: string[],
+  context: ChatContext
+): Promise<string> {
+  try {
+    // 调用文件识别 Agent
+    const { object: identifiedFiles } = await generateObject({
+      model: customOpenai("claude-3-5-haiku-20241022"), // 使用一个快速的模型
+      prompt: `Based on the plan and the file list, identify the relevant files.\n\nPLAN:\n${plan}\n\nFILE SYSTEM LIST:\n${JSON.stringify(
+        fileList,
+        null,
+        2
+      )}`,
+      schema: FileIdentificationSchema,
+      system: FILE_IDENTIFIER_PROMPT,
+    })
+
+    const relevantFilePaths = identifiedFiles.files
+    if (relevantFilePaths.length === 0) {
+      return "No relevant files were identified by the context agent. The Coder must rely on the plan and file system snapshot alone."
+    }
+
+    // 从数据库获取这些文件的当前内容
+    const { data: files, error } = await getFilesForProject(
+      context.supabase,
+      context.projectId,
+      context.user.id
+    )
+
+    if (error) {
+      console.error("Failed to fetch files for context injection:", error)
+      return "Warning: Could not fetch file content for context."
+    }
+
+    const relevantFileContents =
+      files?.filter((file) => relevantFilePaths.includes(file.path)) || []
+
+    // 构建注入的上下文字符串
+    return relevantFileContents
+      .map((file) => `--- FILE: ${file.path} ---\n${file.content}\n`)
+      .join("\n")
+  } catch (err) {
+    console.error("Error in File Identification Agent:", err)
+    return "Critical Error: The file identification agent failed. The Coder must proceed with caution."
+  }
+}
 
 /**
  * 执行多智能体（Agentic）工作流。
@@ -270,10 +319,33 @@ export async function executeAgenticWorkflow(
       decision.next_prompt_input
     )
   } else {
+    const plan = decision.next_prompt_input
+
+    // 从 ChatContext 中获取文件快照 (所有文件的列表)
+    const fileListSnapshot = context.fileContext.startsWith(
+      "File system snapshot:\n"
+    )
+      ? context.fileContext
+          .substring("File system snapshot:\n".length)
+          .split("\n")
+      : []
+
+    // 调用新的辅助函数来构建上下文
+    const modificationContext = await buildModificationContext(
+      plan,
+      fileListSnapshot,
+      context
+    )
+
+    // 将上下文注入到 CODER_PROMPT 中
+    const finalSystemPrompt = CODER_PROMPT.replace(
+      "{relevant_file_content}",
+      modificationContext
+    )
     streamResult = await createAiStream(
       context,
       customOpenai("gemini-2.5-pro"),
-      CODER_PROMPT,
+      finalSystemPrompt,
       decision.next_prompt_input
     )
   }

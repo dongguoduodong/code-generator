@@ -149,7 +149,7 @@
   :where(code):not(:where([class~="not-prose"] *))::after {
     content: "" !important;
   }
- h2 {
+  h2 {
     @apply text-lg font-semibold text-neutral-100 border-b border-neutral-700 pb-2 mb-4 mt-6;
   }
 
@@ -158,25 +158,32 @@
   }
 
   /* -- ✨ 列表样式修复与优化 -- */
-  ol {
-    /* 强制使用十进制数字作为列表标记 */
-    @apply list-decimal; 
+   ol, ul {
+    @apply my-4 list-outside;
+    padding-left: 1.75rem; /* 使用一个固定的值以保证对齐 */
   }
   
-  ul {
-      /* 确保无序列表也有符号 */
-      @apply list-disc;
-  }
-
-  ol, ul {
-    /* 将列表标记放在内容外部，这是标准排版 */
-    @apply list-outside pl-5 my-4; 
-  }
-
+  /* 2. 为列表项设置下边距 */
   li {
-    @apply mb-2 pl-2; /* 为列表项本身添加一些左内边距，使其与编号分开 */
+    @apply mb-2;
   }
 
+  /* 3. 精确控制不同列表的标记 (这是核心修复) */
+  /* 只有 ol 下的直接子 li 才应用数字标记 */
+  ol > li {
+    @apply list-decimal;
+  }
+  
+  /* 只有 ul 下的直接子 li 才应用圆点标记 */
+  ul > li {
+    @apply list-disc;
+  }
+  
+  /* 4. 强制禁用 prose 插件通过伪元素添加的自定义标记 (关键一步) */
+  /* 这可以确保只有我们在上面定义的原生标记会显示出来 */
+  li::before {
+    content: none !important;
+  }
 }
 
 /* 对于行内代码 `like this` 的样式 */
@@ -186,5 +193,5 @@
 }
 
 .live-markdown-container .prose.prose-invert {
-   /* You can add specific overrides for live rendering if needed */
+  /* You can add specific overrides for live rendering if needed */
 }

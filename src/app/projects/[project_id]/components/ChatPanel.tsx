@@ -18,12 +18,14 @@ interface ChatPanelProps {
   chatHook: UseChatHelpers
   project: Pick<Project, "name">
   onOpenFile: (path: string) => void
+  animatingMessageId: string | null
 }
 
 export default function ChatPanel({
   chatHook,
   project,
   onOpenFile,
+  animatingMessageId,
 }: ChatPanelProps) {
   const { messages, input, handleInputChange, handleSubmit, status } = chatHook
   const isLoading = status === "submitted" || status === "streaming"
@@ -51,11 +53,11 @@ export default function ChatPanel({
     messages,
     (m) => m.role === "assistant"
   )
-    const lastMessage = messages[messages.length - 1]
-    const isAiReplying = isLoading && lastMessage?.role === "assistant"
+  const lastMessage = messages[messages.length - 1]
+  const isAiReplying = isLoading && lastMessage?.role === "assistant"
 
-    const showLoadingPlaceholder =
-      isAiReplying && lastMessage.content.trim() === ""
+  const showLoadingPlaceholder =
+    isAiReplying && lastMessage.content.trim() === ""
 
   return (
     <aside className='w-full md:w-1/3 flex flex-col border-r border-neutral-800 h-screen bg-[#0d1117] text-neutral-300'>
@@ -63,8 +65,8 @@ export default function ChatPanel({
         <h2 className='font-bold text-lg truncate'>
           {project.name} - AI Assistant
         </h2>
-        <p className='text-xs text-yellow-400 font-mono animate-pulse h-4 truncate'>
-          {isLoading ? aiStatus : ""}
+        <p className='text-xs font-mono animate-pulse h-4 truncate'>
+          {isLoading || isProcessingQueue ? aiStatus : ""}
         </p>
       </header>
       <div
@@ -119,6 +121,7 @@ export default function ChatPanel({
                       statuses={operationStatuses}
                       isLive={isEffectivelyLive}
                       onOpenFile={onOpenFile}
+                      isAnimating={m.id === animatingMessageId}
                     />
                   ) : (
                     <Markdown remarkPlugins={[remarkGfm]}>{m.content}</Markdown>

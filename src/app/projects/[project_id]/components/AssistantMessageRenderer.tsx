@@ -11,6 +11,7 @@ interface AssistantMessageRendererProps {
   isLive: boolean
   messageId: string
   onOpenFile: (path: string) => void
+  isAnimating: boolean
 }
 
 const AssistantMessageRenderer = React.memo(function AssistantMessageRenderer({
@@ -19,6 +20,7 @@ const AssistantMessageRenderer = React.memo(function AssistantMessageRenderer({
   isLive,
   messageId,
   onOpenFile,
+  isAnimating,
 }: AssistantMessageRendererProps) {
   const structuredResponse = useStreamParser(content, messageId)
 
@@ -28,6 +30,7 @@ const AssistantMessageRenderer = React.memo(function AssistantMessageRenderer({
       statuses={statuses}
       isLive={isLive}
       onOpenFile={onOpenFile}
+      isAnimating={isAnimating}
     />
   )
 })

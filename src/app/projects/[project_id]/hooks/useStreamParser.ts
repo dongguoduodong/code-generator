@@ -16,6 +16,8 @@ export function useStreamParser(
       content = content.substring(2).trim()
     } else if (content.endsWith("</>")) {
       content = content.slice(0, -3).trim()
+    } else if (content.endsWith("</xml>")) { 
+      content = content.slice(0, -6).trim()
     }
 
 

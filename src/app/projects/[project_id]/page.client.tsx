@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useChat } from "@ai-sdk/react"
 import { type ProjectClientPageProps } from "@/types/ui"
 import { type RenderNode } from "@/types/ai"
@@ -33,7 +33,9 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     setPerformanceMetrics,
   } = actions
   const requestStartTime = useRef<number>(0)
-
+  const [animatingMessageId, setAnimatingMessageId] = useState<string | null>(
+    null
+  )
   const processedNodeIds = useRef(new Set<string>())
 
   useEffect(() => {
@@ -100,7 +102,7 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     onError: (err) => setAiStatus(`出现错误: ${err.message}`),
   })
 
-  const { status } = chatHook
+  const { messages, status } = chatHook
 
   const handleSubmitWithContext = useMemoizedFn(
     async (
@@ -151,6 +153,16 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
       setExecutionError(null)
     }
   }, [executionError, chatHook.append, setExecutionError])
+
+  useEffect(() => {
+    const isStreaming = status === "submitted" || status === "streaming"
+    const lastMessage = messages[messages.length - 1]
+
+    if (isStreaming && lastMessage?.role === "assistant") {
+      // 当新一轮流开始时，记录下这个新消息的 ID
+      setAnimatingMessageId(lastMessage.id)
+    }
+  }, [messages, status])
 
   useProjectSetup({ props, chatHook })
 
@@ -273,6 +285,7 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
         chatHook={finalChatHook}
         project={props.project}
         onOpenFile={handleOpenFileFromChat}
+        animatingMessageId={animatingMessageId}
       />
       <WorkspacePanel onFixDevError={handleFixDevError} />
     </div>
