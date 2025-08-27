@@ -97,7 +97,7 @@ export default function StructuredResponse({
   onOpenFile,
 }: StructuredResponseProps) {
   return (
-    <div>
+    <div className="flex gap-2 flex-col">
       {nodes.map((node, index) => {
         let status: OperationStatusType
 
@@ -136,7 +136,7 @@ export default function StructuredResponse({
           case "file":
             const isDelete = node.action === "delete"
             return (
-              <div key={node.id} className='my-4 not-prose'>
+              <div key={node.id} className='not-prose'>
                 {isDelete ? (
                   <div
                     className={cn(
@@ -162,7 +162,7 @@ export default function StructuredResponse({
 
           case "terminal":
             return (
-              <div key={node.id} className='my-4 not-prose'>
+              <div key={node.id} className='not-prose'>
                 <div className='flex items-center gap-2 text-sm font-semibold text-left w-full p-2.5 rounded-md transition-colors bg-neutral-900/30 border border-neutral-700/80'>
                   <OperationStatus status={status} />
                   <TerminalSquare className='h-4 w-4 text-sky-400 flex-shrink-0' />

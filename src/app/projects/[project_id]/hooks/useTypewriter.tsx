@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 
-export const useTypewriter = (text: string, speed: number = 15): string => {
+export const useTypewriter = (text: string, speed: number = 1): string => {
   const [displayedText, setDisplayedText] = useState<string>("")
   const targetTextRef = useRef<string>(text)
   const currentIndexRef = useRef<number>(0)

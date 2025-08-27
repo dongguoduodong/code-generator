@@ -173,13 +173,13 @@ export function CodePanel({
         </div>
         <div className="h-[40%] border-t border-neutral-800 flex flex-col relative">
           {activeErrors.length > 0 && (
-            <div className="absolute top-0 left-0 right-0 z-10 flex flex-col max-h-[100%] overflow-y-auto">
+            <div className="absolute top-0 left-0 z-10 flex flex-col max-h-[100%] overflow-y-auto">
               {activeErrors.map((error) => (
                 <div
                   key={error.id}
-                  className="bg-yellow-900/80 backdrop-blur-sm p-2 border-b border-yellow-700/60 flex justify-between items-center gap-4"
+                  className="bg-yellow-900/80 backdrop-blur-sm p-2 border-b border-yellow-700/60 flex justify-between items-center gap-4 max-w-[722px]"
                 >
-                  <div className="flex items-start gap-2 text-yellow-200 text-sm overflow-hidden">
+                  <div className="flex items-start gap-2 text-yellow-200 text-sm overflow-auto max-w-9/10">
                     <Lightbulb size={16} className="flex-shrink-0 mt-0.5" />
                     <p className="truncate" title={error.log}>
                       AI 检测到问题: {error.log.split("\n")[0]}
