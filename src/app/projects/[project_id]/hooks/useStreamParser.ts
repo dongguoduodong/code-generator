@@ -9,7 +9,6 @@ export function useStreamParser(
   const structuredResponse = useMemo(() => {
     if (!rawContent) return []
     let content = rawContent.trim() 
-
     if (content.startsWith("<>") && content.endsWith("</>")) {
       content = content.slice(2, -3).trim()
     } else if (content.startsWith("<>")) {
@@ -18,6 +17,8 @@ export function useStreamParser(
       content = content.slice(0, -3).trim()
     } else if (content.endsWith("</xml>")) { 
       content = content.slice(0, -6).trim()
+    } else if (content.endsWith("</raw_xml>")) {
+      content = content.slice(0, -10).trim()
     }
 
 
