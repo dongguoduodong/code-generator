@@ -124,13 +124,13 @@ export function CodePanel({
   const activeErrors = devErrors.filter((e) => e.status === "active");
 
   return (
-    <div className="flex-1 flex overflow-hidden">
-      <aside className="w-64 flex-shrink-0 bg-[#161b22] p-2 border-r border-neutral-800 flex flex-col">
-        <h3 className="text-sm font-semibold mb-2 px-2 text-neutral-400">
+    <div className='flex-1 flex overflow-hidden'>
+      <aside className='w-64 flex-shrink-0 bg-[#161b22] p-2 border-r border-neutral-800 flex flex-col'>
+        <h3 className='text-sm font-semibold mb-2 px-2 text-neutral-400'>
           文件浏览器
         </h3>
-        <ScrollArea className="flex-1">
-          <div className="space-y-1 pr-2">
+        <ScrollArea className='flex-1'>
+          <div className='space-y-1 pr-2'>
             {fileSystem.length > 0 ? (
               <FileTree
                 nodes={fileSystem}
@@ -138,7 +138,7 @@ export function CodePanel({
                 activeFile={activeFile}
               />
             ) : (
-              <p className="px-2 text-xs text-neutral-500">
+              <p className='px-2 text-xs text-neutral-500'>
                 等待 AI 创建文件...
               </p>
             )}
@@ -146,14 +146,14 @@ export function CodePanel({
         </ScrollArea>
       </aside>
 
-      <div className="flex-1 flex flex-col">
-        <div className="flex-1 overflow-hidden h-[60%]">
+      <div className='flex-1 flex flex-col'>
+        <div className='flex-1 overflow-hidden h-[60%]'>
           {activeFile ? (
             <CodeMirror
               key={activeFile}
               value={editorContent}
               onChange={handleEditorChange}
-              height="100%"
+              height='100%'
               theme={okaidia}
               extensions={editorExtensions}
               basicSetup={{
@@ -166,37 +166,37 @@ export function CodePanel({
               style={{ height: "100%" }}
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-neutral-500">
+            <div className='w-full h-full flex items-center justify-center text-neutral-500'>
               <p>请从左侧选择一个文件进行编辑</p>
             </div>
           )}
         </div>
-        <div className="h-[40%] border-t border-neutral-800 flex flex-col relative">
+        <div className='h-[40%] border-t border-neutral-800 flex flex-col relative'>
           {activeErrors.length > 0 && (
-            <div className="absolute top-0 left-0 z-10 flex flex-col max-h-[100%] overflow-y-auto">
+            <div className='absolute top-0 left-0 right-0 z-10 flex flex-col max-h-full overflow-y-auto'>
               {activeErrors.map((error) => (
                 <div
                   key={error.id}
-                  className="bg-yellow-900/80 backdrop-blur-sm p-2 border-b border-yellow-700/60 flex justify-between items-center gap-4 max-w-[722px]"
+                  className='bg-yellow-900/80 backdrop-blur-sm p-2 border-b border-yellow-700/60 flex justify-between items-center gap-4 max-w-[722px]'
                 >
-                  <div className="flex items-start gap-2 text-yellow-200 text-sm overflow-auto max-w-9/10">
-                    <Lightbulb size={16} className="flex-shrink-0 mt-0.5" />
-                    <p className="truncate" title={error.log}>
+                  <div className='flex items-start gap-2 text-yellow-200 text-sm overflow-hidden min-w-0'>
+                    <Lightbulb size={16} className='flex-shrink-0 mt-0.5' />
+                    <p className='truncate' title={error.log}>
                       AI 检测到问题: {error.log.split("\n")[0]}
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className='flex gap-2 flex-shrink-0'>
                     <Button
-                      size="sm"
-                      variant="outline"
+                      size='sm'
+                      variant='outline'
                       onClick={() => dismissDevError(error.id)}
                     >
                       忽略
                     </Button>
                     <Button
-                      size="sm"
+                      size='sm'
                       onClick={() => onFixDevError(error.log)}
-                      className="bg-yellow-500 hover:bg-yellow-600 text-black"
+                      className='bg-yellow-500 hover:bg-yellow-600 text-black'
                     >
                       AI 修复
                     </Button>
@@ -211,14 +211,14 @@ export function CodePanel({
               activeErrors.length > 0 && "opacity-0 pointer-events-none"
             )}
           >
-            <TerminalSquare size={14} className="mr-2" /> 终端
+            <TerminalSquare size={14} className='mr-2' /> 终端
           </div>
           <div
             ref={terminalRef}
-            className="w-full flex-1 bg-[#0D1117] overflow-hidden p-2"
+            className='w-full flex-1 bg-[#0D1117] overflow-hidden p-2'
           ></div>
         </div>
       </div>
     </div>
-  );
+  )
 }

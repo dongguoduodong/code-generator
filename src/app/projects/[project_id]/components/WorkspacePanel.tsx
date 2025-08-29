@@ -89,7 +89,7 @@ export default function WorkspacePanel({
           />
         </TabsContent>
       </Tabs>
-      <PerformanceMonitor />
+      {/* <PerformanceMonitor /> */}
     </main>
   )
 }

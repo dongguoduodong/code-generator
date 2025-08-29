@@ -184,6 +184,9 @@
   li::before {
     content: none !important;
   }
+  hr {
+     @apply border-neutral-700/80 my-6;
+   }
 }
 
 /* 对于行内代码 `like this` 的样式 */

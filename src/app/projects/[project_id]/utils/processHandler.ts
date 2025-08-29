@@ -1,55 +1,59 @@
-import type { WebContainerProcess } from "@webcontainer/api";
-import type { Terminal } from "xterm";
-import stripAnsi from "strip-ansi";
+import type { WebContainerProcess } from "@webcontainer/api"
+import type { Terminal } from "xterm"
+import stripAnsi from "strip-ansi"
 
 export interface ProcessErrorCheckOptions {
-  regex: RegExp;
-  onDetection: (cleanedLog: string) => void;
+  regex: RegExp
+  onDetection: (cleanedLog: string) => void
 }
 
 export interface ProcessHandlerOptions {
-  terminal?: Terminal;
-  errorCheck?: ProcessErrorCheckOptions;
+  terminal?: Terminal
+  errorCheck?: ProcessErrorCheckOptions
+  onSuccess?: () => void
 }
+
+const VITE_HMR_SUCCESS_REGEX = /\[vite\] hmr update/i
 
 export async function handleProcess(
   process: WebContainerProcess,
   options: ProcessHandlerOptions = {}
 ): Promise<{ exitCode: number; output: string }> {
-  let accumulatedOutput = "";
-  const { terminal, errorCheck } = options;
-  let currentLine = "";
+  let accumulatedOutput = ""
+  const { terminal, errorCheck, onSuccess } = options
+  let currentLine = ""
 
   const processLine = (line: string) => {
-    const cleanedLine = stripAnsi(line);
-    if (errorCheck && errorCheck.regex.test(cleanedLine)) {
-      // 一旦检测到错误行，立即调用回调
-      errorCheck.onDetection(cleanedLine);
+    const cleanedLine = stripAnsi(line)
+    if (onSuccess && VITE_HMR_SUCCESS_REGEX.test(cleanedLine)) {
+      onSuccess()
+    } else if (errorCheck && errorCheck.regex.test(cleanedLine)) {
+      errorCheck.onDetection(cleanedLine)
     }
-  };
+  }
 
   process.output.pipeTo(
     new WritableStream({
       write(data) {
         if (terminal) {
-          terminal.write(data);
+          terminal.write(data)
         }
-        accumulatedOutput += data;
+        accumulatedOutput += data
 
-        const newLines = (currentLine + data).split(/\r\n|\n|\r/);
-        currentLine = newLines.pop() || ""; // 最后一部分可能是不完整的行，留待下次处理
+        const newLines = (currentLine + data).split(/\r\n|\n|\r/)
+        currentLine = newLines.pop() || "" // 最后一部分可能是不完整的行，留待下次处理
 
-        newLines.forEach(processLine);
+        newLines.forEach(processLine)
       },
     })
-  );
+  )
 
-  const exitCode = await process.exit;
+  const exitCode = await process.exit
 
   // 确保最后剩余的行也被处理
   if (currentLine) {
-    processLine(currentLine);
+    processLine(currentLine)
   }
 
-  return { exitCode, output: accumulatedOutput };
+  return { exitCode, output: accumulatedOutput }
 }

@@ -76,6 +76,7 @@ export interface WorkspaceActions {
   addDevError: (log: string) => void
   dismissDevError: (errorId: string) => void
   clearAllDevErrors: () => void
+  clearCompilationErrors: () => void
   runCommand: (command: string, args: string[]) => Promise<void>
   runBackgroundTask: (command: string, args: string[]) => void
   startInteractiveShell: () => void
@@ -138,7 +139,9 @@ export const createWorkspaceStore = () => {
         throw new Error("环境未就绪，无法执行命令。")
 
       const fullCommand = `${command} ${args.join(" ")}`
+
       terminal.write(`\r\n\x1b[1;32m$ \x1b[0m${fullCommand}\r\n`)
+
       const process = await webcontainer.spawn(command, args)
       const { exitCode, output } = await handleProcess(process, { terminal })
 
@@ -156,9 +159,16 @@ export const createWorkspaceStore = () => {
         return
       }
 
+      const fullCommand = `${command} ${args.join(" ")}`
+
+      // --- 核心增强逻辑 (同样应用在此处) ---
+      terminal.write(`\r\n\x1b[1;32m$ \x1b[0m${fullCommand}\r\n`)
+      // ---------------------------------
+
       const process = await webcontainer.spawn(command, args)
       handleProcess(process, {
         terminal,
+        onSuccess: () => actions.clearCompilationErrors(),
         errorCheck: {
           regex: /error|failed|exception|unhandled|could not be resolved/i,
           onDetection: (cleanedLog) => actions.addDevError(cleanedLog),
@@ -349,6 +359,13 @@ export const createWorkspaceStore = () => {
           }))
         },
         clearAllDevErrors: () => set({ devErrors: [] }),
+        clearCompilationErrors: () => {
+          set((state) => ({
+            devErrors: state.devErrors.map((e) =>
+              e.status === "active" ? { ...e, status: "dismissed" } : e
+            ),
+          }))
+        },
         runCommand: runCommandAsync,
         runBackgroundTask: runBackgroundTaskAsync,
         startInteractiveShell: startInteractiveShellAsync,
