@@ -82,7 +82,6 @@ export interface WorkspaceActions {
   startInteractiveShell: () => void
   setPerformanceMetrics: (metrics: Partial<PerformanceMetrics>) => void
   setActiveWorkspaceTab: (tab: "code" | "preview") => void
-  setIsLoadingContainer: (loading: boolean) => void
 }
 
 const saveOperationsToDb = async (
@@ -240,7 +239,6 @@ export const createWorkspaceStore = () => {
           if (result.success) {
             if (instruction.type === "file") {
               const { path, action, content } = instruction
-              if (!path) throw new Error("文件路径缺失，无法执行文件操作。")
               switch (action) {
                 case "create":
                   get().actions.createFileNode(path, content)
@@ -286,8 +284,6 @@ export const createWorkspaceStore = () => {
             isLoadingContainer: !instance,
             currentProjectId: instance ? projectId : null,
           }),
-        setIsLoadingContainer: (loading: boolean) =>
-          set({ isLoadingContainer: loading }),
         setTerminal: (instance) => set({ terminal: instance }),
         setGitignoreParser: (parser) => set({ gitignoreParser: parser }),
         setExecutionError: (error) => set({ executionError: error }),

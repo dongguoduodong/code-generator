@@ -52,27 +52,24 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
         storeActions.resetWorkspace()
       }
 
-      initWebContainer().then((webcontainerInstance) => {
-        console.log("WebContainer 实例已初始化。", webcontainerInstance)
-        if (webcontainerInstance) {
-          actions.setWebcontainer(webcontainerInstance, project.id)
+      const webcontainerInstance = await initWebContainer()
 
-          // WebContainer 启动成功后，继续后续步骤
-          import("xterm").then(({ Terminal }) => {
-            const term = new Terminal({
-              convertEol: true,
-              cursorBlink: true,
-              theme: { background: "#0D1117", foreground: "#e0e0e0" },
-              rows: 15,
-              fontSize: 13,
-              fontFamily: "var(--font-geist-mono), monospace",
-              lineHeight: 1.4,
-            })
-            actions.setTerminal(term)
-            console.log("WebContainer 和 Terminal 已准备就绪。")
-          })
-        }
-      })
+      if (webcontainerInstance) {
+        const { Terminal } = await import("xterm")
+        const term = new Terminal({
+          convertEol: true,
+          cursorBlink: true,
+          theme: { background: "#0D1117", foreground: "#e0e0e0" },
+          rows: 15,
+          fontSize: 13,
+          fontFamily: "var(--font-geist-mono), monospace",
+          lineHeight: 1.4,
+        })
+
+        actions.setWebcontainer(webcontainerInstance, project.id)
+        actions.setTerminal(term)
+        console.log("WebContainer 和 Terminal 已准备就绪。")
+      }
     }
 
     setupEnvironment()
@@ -127,11 +124,5 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
     }
 
     hydrateAndSetup()
-    return () => {
-      const { actions, webcontainer } = storeApi.getState()
-      if (webcontainer) {
-        actions.resetWorkspace()
-      }
-    }
   }, [webcontainer, terminal, initialFiles, writeFile, actions])
 }
