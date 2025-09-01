@@ -121,7 +121,7 @@ export function CodePanel({
     }
   }, [terminal, debouncedFit]);
 
-  const activeErrors = devErrors.filter((e) => e.status === "active");
+  const activeErrors = devErrors.filter((e) => e.status === "active").slice(0, 3);
 
   return (
     <div className='flex-1 flex overflow-hidden'>

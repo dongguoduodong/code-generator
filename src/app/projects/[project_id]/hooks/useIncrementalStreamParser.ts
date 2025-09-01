@@ -6,6 +6,7 @@ import { simpleHash } from "../utils/parse"
 
 enum ParserState {
   SEARCHING_FOR_TAG,
+  CAPTURING_TAG_DEFINITION,
   CAPTURING_FILE_CONTENT,
 }
 
@@ -28,14 +29,8 @@ const parseAttributes = (tagContent: string): Record<string, string> => {
   return attributes
 }
 
-/**
- * 增量流式解析器。
- * 采用精确的 FSM 模型，能够正确区分结构标签和文件内容，并安全处理包装标签。
- *
- * @param messageId 正在处理的消息的唯一ID。
- * @param rawContent 到目前为止收到的完整原始消息流内容。
- * @returns RenderNode 对象数组。
- */
+const STRUCTURAL_TAG_REGEX = /<(file|terminal)\s/
+
 export function useIncrementalStreamParser(
   messageId: string,
   rawContent: string
@@ -85,7 +80,17 @@ export function useIncrementalStreamParser(
         const tagStartIndex = unprocessedBuffer.indexOf("<")
 
         if (tagStartIndex === -1) {
-          getOrCreateLastMarkdownNode().content = unprocessedBuffer
+          const lastMdNode = getOrCreateLastMarkdownNode()
+          // [+] START: 修正拼写错误和逻辑错误
+          // 获取从当前光标到末尾的所有新内容
+          const newContent = state.buffer.substring(state.cursor)
+          if (newContent) {
+            // 正确地追加新内容，而不是覆盖
+            lastMdNode.content += newContent
+          }
+          // 将光标移动到末尾，因为所有剩余内容都已处理
+          state.cursor = state.buffer.length
+          // [+] END: 修正
           break main_loop
         }
 
@@ -96,11 +101,16 @@ export function useIncrementalStreamParser(
         )
 
         if (markdownContent) {
-          getOrCreateLastMarkdownNode().content = markdownContent
+          getOrCreateLastMarkdownNode().content += markdownContent
         }
 
         state.cursor = absoluteTagStartIndex
-        const tagEndIndex = unprocessedBuffer.indexOf(">", tagStartIndex)
+        state.fsmState = ParserState.CAPTURING_TAG_DEFINITION
+        break
+      }
+
+      case ParserState.CAPTURING_TAG_DEFINITION: {
+        const tagEndIndex = unprocessedBuffer.indexOf(">")
 
         if (tagEndIndex === -1) {
           break main_loop
@@ -113,15 +123,13 @@ export function useIncrementalStreamParser(
 
         let tagProcessed = false
 
-        // 安全地处理包装标签
-        if (tagDefinition === "" || tagDefinition === "/") {
-          tagProcessed = true
-        } else if (
+        if (
           tagDefinition.startsWith("file") &&
           !tagDefinition.startsWith("/file")
         ) {
           const attrs = parseAttributes(tagDefinition)
           if (attrs.path && attrs.action) {
+            getOrCreateLastMarkdownNode() // 确保在文件节点前有一个markdown节点容器
             const fileNode: Extract<RenderNode, { type: "file" }> = {
               id: `${messageId}-file-${attrs.action}-${attrs.path}`,
               type: "file",
@@ -137,10 +145,11 @@ export function useIncrementalStreamParser(
           }
         } else if (
           tagDefinition.startsWith("terminal") &&
-          tagDefinition.endsWith("/")
+          tagDefinition.trim().endsWith("/")
         ) {
           const attrs = parseAttributes(tagDefinition)
           if (attrs.command) {
+            getOrCreateLastMarkdownNode() // 确保在终端节点前有一个markdown节点容器
             const terminalNode: Extract<RenderNode, { type: "terminal" }> = {
               id: `${messageId}-terminal-${simpleHash(attrs.command)}`,
               type: "terminal",
@@ -148,57 +157,91 @@ export function useIncrementalStreamParser(
               background: attrs.bg === "true",
             }
             state.nodes.push(terminalNode)
+            state.fsmState = ParserState.SEARCHING_FOR_TAG
             tagProcessed = true
           }
         }
 
-        if (tagProcessed) {
-          state.cursor = absoluteTagEndIndex
-        } else {
-          getOrCreateLastMarkdownNode().content += "<"
-          state.cursor++
+        if (!tagProcessed) {
+          const unrecognizedTagText = state.buffer.substring(
+            state.cursor,
+            absoluteTagEndIndex
+          )
+          getOrCreateLastMarkdownNode().content += unrecognizedTagText
+          state.fsmState = ParserState.SEARCHING_FOR_TAG
         }
+
+        state.cursor = absoluteTagEndIndex
         break
       }
 
       case ParserState.CAPTURING_FILE_CONTENT: {
         const endFileTagIndex = unprocessedBuffer.indexOf("</file>")
+        const nextStructuralTagMatch =
+          unprocessedBuffer.match(STRUCTURAL_TAG_REGEX)
+        const nextStructuralTagIndex = nextStructuralTagMatch?.index ?? -1
 
-        if (endFileTagIndex === -1) {
-          if (state.activeFileNode) {
-            // 将所有未处理的内容都视为文件内容，无论其中包含什么
-            state.activeFileNode.content = unprocessedBuffer
+        if (
+          nextStructuralTagIndex !== -1 &&
+          (endFileTagIndex === -1 || nextStructuralTagIndex < endFileTagIndex)
+        ) {
+          const contentBeforeNewTag = unprocessedBuffer.substring(
+            0,
+            nextStructuralTagIndex
+          )
+          if (state.activeFileNode && contentBeforeNewTag) {
+            state.activeFileNode.content += contentBeforeNewTag
           }
-          // 等待更多数据以找到 </file>
-          break main_loop
+
+          if (state.activeFileNode) {
+            state.activeFileNode.isClosed = true
+            console.warn(
+              `[Parser] Force-closing unclosed file tag for "${state.activeFileNode.path}" due to new structural tag starting.`
+            )
+          }
+          state.activeFileNode = null
+
+          state.cursor += nextStructuralTagIndex
+          state.fsmState = ParserState.SEARCHING_FOR_TAG
+          break
         }
 
-        const absoluteEndFileTagIndex = state.cursor + endFileTagIndex
-        const fileContent = state.buffer.substring(
-          state.cursor,
-          absoluteEndFileTagIndex
-        )
+        if (endFileTagIndex !== -1) {
+          const absoluteEndFileTagIndex = state.cursor + endFileTagIndex
+          const finalContentChunk = state.buffer.substring(
+            state.cursor,
+            absoluteEndFileTagIndex
+          )
+
+          if (state.activeFileNode) {
+            if (finalContentChunk) {
+              state.activeFileNode.content += finalContentChunk
+            }
+            state.activeFileNode.isClosed = true
+            state.activeFileNode = null
+          }
+
+          state.cursor = absoluteEndFileTagIndex + "</file>".length
+          state.fsmState = ParserState.SEARCHING_FOR_TAG
+          break
+        }
 
         if (state.activeFileNode) {
-          state.activeFileNode.content = fileContent
-          state.activeFileNode.isClosed = true
-          state.activeFileNode = null
+          // 只追加新收到的内容
+          const existingContentLength = state.activeFileNode.content.length
+          const newContent = unprocessedBuffer.substring(existingContentLength)
+          if (newContent) {
+            state.activeFileNode.content += newContent
+          }
+          state.cursor = state.buffer.length
         }
-
-        state.cursor = absoluteEndFileTagIndex + "</file>".length
-        state.fsmState = ParserState.SEARCHING_FOR_TAG
-        break
+        break main_loop
       }
     }
   }
 
-  // 返回前进行最后清理，移除可能产生的空 Markdown 节点
   const finalNodes = state.nodes.filter(
-    (node) =>
-      !(
-        node.type === "markdown" &&
-        (node.content.trim() === "" || node.content === "/>")
-      )
+    (node) => !(node.type === "markdown" && (node.content.trim() === "" || node.content.trim() === "/>"))
   )
 
   return finalNodes
