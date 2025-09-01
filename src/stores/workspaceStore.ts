@@ -239,6 +239,9 @@ export const createWorkspaceStore = () => {
           if (result.success) {
             if (instruction.type === "file") {
               const { path, action, content } = instruction
+              if (!path || !action) {
+                throw new Error("Invalid file instruction: missing path or action")
+              }
               switch (action) {
                 case "create":
                   get().actions.createFileNode(path, content)
