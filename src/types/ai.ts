@@ -15,14 +15,14 @@ export const FileOperationTypeText: Record<FileOperationType, string> = {
 export type RenderNode =
   | { id: string; type: "markdown"; content: string }
   | {
-      id: string;
-      type: "file";
-      path: string;
-      action: FileOperationType;
-      content: string;
-      isClosed: boolean;
+      id: string
+      type: "file"
+      path?: string // Path is now optional
+      action?: FileOperationType
+      content: string
+      isClosed: boolean
     }
-  | { id: string; type: "terminal"; command: string; background?: boolean };
+  | { id: string; type: "terminal"; command: string; background?: boolean }
 
 export type OperationStatusType =
   | "pending"

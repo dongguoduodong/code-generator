@@ -1,3 +1,5 @@
+"use client"
+
 import React, { useState } from "react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -11,14 +13,7 @@ import {
   RenderNode,
 } from "@/types/ai"
 import { cn } from "@/lib/utils"
-import { ChevronDown, FileCode, TerminalSquare } from "lucide-react" // 引入新图标
-import { useTypewriter } from "../hooks/useTypewriter"
-
-export const LiveMarkdownRenderer = ({ content }: { content: string }) => {
-  const typedText = useTypewriter(content)
-
-  return <Markdown remarkPlugins={[remarkGfm]}>{typedText}</Markdown>
-}
+import { ChevronDown, FileCode, TerminalSquare } from "lucide-react"
 
 const FileOperationRenderer = ({
   node,
@@ -31,7 +26,11 @@ const FileOperationRenderer = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(false)
 
-  const lang = node.path.split(".").pop() || "bash"
+  const lang = node.path ? node.path.split(".").pop() || "bash" : "bash"
+  const displayPath = node.path || "[解析中...]"
+  const displayAction = node.action
+    ? FileOperationTypeText[node.action]
+    : "文件操作"
 
   return (
     <details
@@ -44,13 +43,22 @@ const FileOperationRenderer = ({
         <span
           onClick={(e) => {
             e.preventDefault()
-            onOpenFile(node.path)
+            if (node.path) {
+              onOpenFile(node.path)
+            }
           }}
-          className='truncate flex-1 text-neutral-300 hover:text-blue-400 hover:underline'
-          title={`点击在编辑器中打开 ${node.path}`}
+          className={cn(
+            "truncate flex-1 text-neutral-300",
+            node.path && "hover:text-blue-400 hover:underline"
+          )}
+          title={
+            node.path
+              ? `点击在编辑器中打开 ${node.path}`
+              : "正在等待文件路径..."
+          }
         >
-          {FileOperationTypeText[node.action]}文件:{" "}
-          <strong className='font-bold text-neutral-100'>{node.path}</strong>
+          {displayAction}文件:{" "}
+          <strong className='font-bold text-neutral-100'>{displayPath}</strong>
         </span>
         <ChevronDown className='h-4 w-4 transition-transform group-open:rotate-180 flex-shrink-0' />
       </summary>
@@ -81,28 +89,25 @@ const FileOperationRenderer = ({
   )
 }
 
-interface StructuredResponseProps {
-  nodes: RenderNode[]
-  statuses: OperationStatuses
-  isLive: boolean
-  isAnimating: boolean
-  onOpenFile: (path: string) => void
-}
-
 export default function StructuredResponse({
   nodes,
   statuses,
   isLive,
   isAnimating,
   onOpenFile,
-}: StructuredResponseProps) {
+}: {
+  nodes: RenderNode[]
+  statuses: OperationStatuses
+  isLive: boolean
+  isAnimating: boolean
+  onOpenFile: (path: string) => void
+}) {
   return (
-    <div className="flex gap-2 flex-col">
-      {nodes.map((node, index) => {
+    <div className='flex gap-2 flex-col'>
+      {nodes.map((node) => {
         let status: OperationStatusType
 
         if (!isLive && !isAnimating) {
-          // 动画结束且流结束后，所有状态都视为完成
           status = "completed"
         } else {
           status = statuses[node.id] || "pending"
@@ -110,19 +115,8 @@ export default function StructuredResponse({
 
         switch (node.type) {
           case "markdown":
-            if (!node.content.trim()) {
+            if (!node.content.trim() && !isLive) {
               return null
-            }
-            const isLastNode = index === nodes.length - 1
-            if (isAnimating && isLastNode) {
-              return (
-                <div
-                  key={node.id}
-                  className='prose prose-sm prose-invert max-w-full'
-                >
-                  <LiveMarkdownRenderer content={node.content} />
-                </div>
-              )
             }
             return (
               <div
@@ -134,7 +128,12 @@ export default function StructuredResponse({
             )
 
           case "file":
+            // --- FIX START: Safely handle potentially undefined action ---
             const isDelete = node.action === "delete"
+            const displayAction = node.action
+              ? FileOperationTypeText[node.action]
+              : "文件操作"
+            const displayPath = node.path || "[解析中...]"
             return (
               <div key={node.id} className='not-prose'>
                 {isDelete ? (
@@ -146,8 +145,8 @@ export default function StructuredResponse({
                   >
                     <OperationStatus status={status} />
                     <span>
-                      🗑️ {FileOperationTypeText[node.action]}文件:{" "}
-                      <strong className='font-bold'>{node.path}</strong>
+                      🗑️ {displayAction}文件:{" "}
+                      <strong className='font-bold'>{displayPath}</strong>
                     </span>
                   </div>
                 ) : (

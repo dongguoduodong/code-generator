@@ -46,11 +46,11 @@ export interface WorkspaceState {
 }
 
 export interface PerformanceMetrics {
-  lastRequestDuration: number | null // 后端API总耗时
-  routerDecisionTime: number | null // Router Agent耗时
-  preJudgmentTime: number | null // 本地快速决策耗时
-  timeToFirstToken: number | null // 客户端TTFT
-  fullResponseTime: number | null // 客户端完整响应时间
+  lastRequestDuration: number | null
+  routerDecisionTime: number | null
+  preJudgmentTime: number | null
+  timeToFirstToken: number | null
+  fullResponseTime: number | null
 }
 
 export interface WorkspaceActions {
@@ -161,9 +161,7 @@ export const createWorkspaceStore = () => {
 
       const fullCommand = `${command} ${args.join(" ")}`
 
-      // --- 核心增强逻辑 (同样应用在此处) ---
       terminal.write(`\r\n\x1b[1;32m$ \x1b[0m${fullCommand}\r\n`)
-      // ---------------------------------
 
       const process = await webcontainer.spawn(command, args)
       handleProcess(process, {
@@ -276,8 +274,6 @@ export const createWorkspaceStore = () => {
       get().actions.clearAllDevErrors()
       set({ isProcessing: false, aiStatus: "AI 已完成所有任务，正在待命..." })
     }
-
-    // --- 返回最终的 Store 对象 ---
 
     return {
       ...initialState,

@@ -28,7 +28,7 @@ export const POST = async (req: NextRequest) => {
   }
   try {
     const { object: metadata } = await generateObject({
-      model: customOpenai("claude-3-5-haiku-20241022"),
+      model: customOpenai("gemini-2.5-flash"),
       schema: z.object({
         title: z.string().describe("A short, catchy title for the project."),
         description: z

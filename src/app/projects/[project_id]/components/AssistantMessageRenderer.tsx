@@ -1,12 +1,13 @@
 "use client"
 
 import React from "react"
-import { useStreamParser } from "../hooks/useStreamParser"
 import StructuredResponse from "./StructuredResponse"
 import { OperationStatuses } from "@/types/ai"
+import { useIncrementalStreamParser } from "../hooks/useIncrementalStreamParser"
 
 interface AssistantMessageRendererProps {
   content: string
+
   statuses: OperationStatuses
   isLive: boolean
   messageId: string
@@ -22,7 +23,7 @@ const AssistantMessageRenderer = React.memo(function AssistantMessageRenderer({
   onOpenFile,
   isAnimating,
 }: AssistantMessageRendererProps) {
-  const structuredResponse = useStreamParser(content, messageId)
+  const structuredResponse = useIncrementalStreamParser(messageId, content)
 
   return (
     <StructuredResponse

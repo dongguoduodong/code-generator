@@ -1,3 +1,4 @@
+import { performance } from "perf_hooks"
 import {
   streamText,
   generateObject,
@@ -136,6 +137,9 @@ export async function determineNextStep(
 
   if (fastPathDecision) {
     metrics.preJudgmentTime = performance.now() - preJudgmentStartTime
+    console.log(
+      `[PERF] Pre-judgment router took: ${metrics.preJudgmentTime.toFixed(2)}ms`
+    )
     return { decision: fastPathDecision, performance: metrics }
   }
 
@@ -145,14 +149,18 @@ export async function determineNextStep(
   ).replace("{file_system_snapshot}", fileContext)
 
   const routerStartTime = performance.now()
+  console.log("[PERF] Calling Router Agent...")
   const { object: decision } = await generateObject<RouterDecision>({
-    model: customOpenai("claude-3-5-haiku-20241022"),
+    model: customOpenai("gemini-2.5-flash"),
     system: routerSystemPrompt,
     prompt: `User's latest message: "${messages[messages.length - 1].content}"`,
     schema: RouterDecisionSchema,
   })
 
   metrics.routerTime = performance.now() - routerStartTime
+  console.log(
+    `[PERF] Router Agent decision took: ${metrics.routerTime.toFixed(2)}ms`
+  )
 
   return { decision, performance: metrics }
 }
@@ -209,6 +217,7 @@ export async function executeEndToEndWorkflow(
 
   return streamResult.toDataStreamResponse()
 }
+
 async function buildModificationContext(
   plan: string,
   fileList: string[],
@@ -216,8 +225,10 @@ async function buildModificationContext(
 ): Promise<string> {
   try {
     // 调用文件识别 Agent
+    const fileIdentifierStartTime = performance.now()
+    console.log("[PERF] Calling File Identification Agent...")
     const { object: identifiedFiles } = await generateObject({
-      model: customOpenai("claude-3-5-haiku-20241022"), // 使用一个快速的模型
+      model: customOpenai("gemini-2.5-flash"), // 使用一个快速的模型
       prompt: `Based on the plan and the file list, identify the relevant files.\n\nPLAN:\n${plan}\n\nFILE SYSTEM LIST:\n${JSON.stringify(
         fileList,
         null,
@@ -226,6 +237,11 @@ async function buildModificationContext(
       schema: FileIdentificationSchema,
       system: FILE_IDENTIFIER_PROMPT,
     })
+    console.log(
+      `[PERF] File Identification Agent took: ${(
+        performance.now() - fileIdentifierStartTime
+      ).toFixed(2)}ms`
+    )
 
     const relevantFilePaths = identifiedFiles.files
     if (relevantFilePaths.length === 0) {
@@ -265,9 +281,20 @@ async function buildModificationContext(
 export async function executeAgenticWorkflow(
   context: ChatContext
 ): Promise<Response> {
-  const { decision, performance } = await determineNextStep(context)
+  const workflowStartTime = performance.now()
+  console.log("[PERF] Starting Agentic Workflow...")
+
+  const { decision, performance: stepPerformance } = await determineNextStep(
+    context
+  )
+
   console.log("Router Decision:", decision)
   let streamResult: StreamTextResult<never, never>
+
+  const secondAgentCallStartTime = performance.now()
+  console.log(
+    `[PERF] Calling next agent based on decision: ${decision.decision}`
+  )
 
   if (decision.templateId && decision.decision === "PLAN") {
     const template = getTemplateById(decision.templateId)
@@ -350,20 +377,33 @@ export async function executeAgenticWorkflow(
     )
   }
 
+  console.log(
+    `[PERF] Second Agent call (${decision.decision}) took: ${(
+      performance.now() - secondAgentCallStartTime
+    ).toFixed(2)}ms`
+  )
+
   const response = streamResult.toDataStreamResponse()
 
-  if (performance.routerTime) {
+  // --- 关键修正：使用重命名后的变量 stepPerformance ---
+  if (stepPerformance.routerTime) {
     response.headers.set(
       "X-Performance-Router-Time",
-      performance.routerTime.toFixed(2)
+      stepPerformance.routerTime.toFixed(2)
     )
   }
-  if (performance.preJudgmentTime) {
+  if (stepPerformance.preJudgmentTime) {
     response.headers.set(
       "X-Performance-Prejudgment-Time",
-      performance.preJudgmentTime.toFixed(2)
+      stepPerformance.preJudgmentTime.toFixed(2)
     )
   }
+
+  console.log(
+    `[PERF] Total Agentic Workflow time before streaming: ${(
+      performance.now() - workflowStartTime
+    ).toFixed(2)}ms`
+  )
 
   return response
 }
