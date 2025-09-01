@@ -21,6 +21,9 @@ export async function executeFileInstruction(
   const { path, action, content } = instruction;
 
   try {
+    if (!path || !action) {
+      throw new Error("Invalid file instruction: missing path or action");
+    }
     const dbOperation: FileOperation = {
       type: action,
       path,
