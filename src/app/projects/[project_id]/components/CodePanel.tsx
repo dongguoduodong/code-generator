@@ -1,47 +1,58 @@
-"use client";
+"use client"
 
-import React, { useEffect, useRef, useMemo, useCallback } from "react";
-import "xterm/css/xterm.css";
-import { FitAddon } from "xterm-addon-fit";
-import CodeMirror from "@uiw/react-codemirror";
-import { okaidia } from "@uiw/codemirror-theme-okaidia";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Lightbulb, TerminalSquare } from "lucide-react";
-import { useWorkspaceStore } from "@/stores/WorkspaceStoreProvider";
-import { useWebContainer } from "../hooks/useWebContainer";
-import { toast } from "sonner";
-import { useDebounceFn } from "ahooks";
-import { FileOperationType } from "@/types/ai";
-import { apiClient } from "@/lib/apiClient";
-import { FileTree } from "./FileTree";
-import { Button } from "@/components/ui/button";
-import { getLanguageExtension } from "../utils/markdown";
-import { cn } from "@/lib/utils";
+import React, { useEffect, useRef, useMemo, useCallback } from "react"
+import "xterm/css/xterm.css"
+import { FitAddon } from "xterm-addon-fit"
+import CodeMirror from "@uiw/react-codemirror"
+import { okaidia } from "@uiw/codemirror-theme-okaidia"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Lightbulb, TerminalSquare } from "lucide-react"
+import { useWorkspaceStore } from "@/stores/WorkspaceStoreProvider"
+import { useWebContainer } from "../hooks/useWebContainer"
+import { toast } from "sonner"
+import { useDebounceFn } from "ahooks"
+import { FileOperationType } from "@/types/ai"
+import { apiClient } from "@/lib/apiClient"
+import { FileTree } from "./FileTree"
+import { Button } from "@/components/ui/button"
+import { getLanguageExtension } from "../utils/markdown"
+import { cn } from "@/lib/utils"
+
+const editorBasicSetup = {
+  foldGutter: true,
+  allowMultipleSelections: true,
+  indentOnInput: true,
+  lineNumbers: true,
+  autocompletion: true,
+}
+
+const editorStyle = {
+  height: "100%",
+}
 
 export function CodePanel({
   onFixDevError,
 }: {
-  onFixDevError: (errorLog: string) => void;
+  onFixDevError: (errorLog: string) => void
 }) {
-  const fileSystem = useWorkspaceStore((state) => state.fileSystem);
-  const activeFile = useWorkspaceStore((state) => state.activeFile);
-  const editorContent = useWorkspaceStore((state) => state.editorContent);
-  const actions = useWorkspaceStore((state) => state.actions);
-  const currentProjectId = useWorkspaceStore((state) => state.currentProjectId);
-  const devErrors = useWorkspaceStore((state) => state.devErrors);
-  const terminal = useWorkspaceStore((state) => state.terminal);
+  const fileSystem = useWorkspaceStore((state) => state.fileSystem)
+  const activeFile = useWorkspaceStore((state) => state.activeFile)
+  const editorContent = useWorkspaceStore((state) => state.editorContent)
+  const actions = useWorkspaceStore((state) => state.actions)
+  const currentProjectId = useWorkspaceStore((state) => state.currentProjectId)
+  const devErrors = useWorkspaceStore((state) => state.devErrors)
+  const terminal = useWorkspaceStore((state) => state.terminal)
 
-  const { setActiveFile, setEditorContent, dismissDevError } =
-    actions;
-  const { readFile, writeFile } = useWebContainer(currentProjectId || "");
+  const { setActiveFile, setEditorContent, dismissDevError } = actions
+  const { readFile, writeFile } = useWebContainer(currentProjectId || "")
 
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
+  const terminalRef = useRef<HTMLDivElement>(null)
+  const fitAddonRef = useRef<FitAddon | null>(null)
 
   const { run: debouncedSaveToDb } = useDebounceFn(
     async (path: string, content: string) => {
-      if (!currentProjectId) return;
-      toast.info("正在保存改动...");
+      if (!currentProjectId) return
+      toast.info("正在保存改动...")
       try {
         await apiClient(`/api/projects/${currentProjectId}/files`, {
           method: "POST",
@@ -50,78 +61,77 @@ export function CodePanel({
             operations: [{ type: FileOperationType.UPDATE, path, content }],
             projectId: currentProjectId,
           }),
-        });
-        toast.success("改动已保存！");
+        })
+        toast.success("改动已保存！")
       } catch (error) {
         toast.error("保存失败", {
           description: error instanceof Error ? error.message : "未知错误",
-        });
+        })
       }
     },
     { wait: 2000 }
-  );
+  )
 
   const { run: debouncedFit } = useDebounceFn(
     () => fitAddonRef.current?.fit(),
     { wait: 50 }
-  );
+  )
 
   const handleFileClick = useCallback(
     async (path: string) => {
-      const content = await readFile(path);
-      setActiveFile(path, content ?? "");
+      const content = await readFile(path)
+      setActiveFile(path, content ?? "")
     },
     [readFile, setActiveFile]
-  );
+  )
 
   const handleEditorChange = useCallback(
     (value: string) => {
-      setEditorContent(value);
+      setEditorContent(value)
       if (activeFile) {
-        writeFile(activeFile, value);
-        debouncedSaveToDb(activeFile, value);
+        writeFile(activeFile, value)
+        debouncedSaveToDb(activeFile, value)
       }
     },
     [activeFile, setEditorContent, writeFile, debouncedSaveToDb]
-  );
+  )
 
   const editorExtensions = useMemo(
     () => getLanguageExtension(activeFile),
     [activeFile]
-  );
+  )
 
   useEffect(() => {
-    // Terminal is now created centrally. This effect's job is to attach it to the DOM.
     if (terminal && terminalRef.current && !terminal.element) {
       try {
-        const fitAddon = new FitAddon();
-        fitAddonRef.current = fitAddon;
-        terminal.loadAddon(fitAddon);
-        terminal.open(terminalRef.current);
-        fitAddon.fit();
+        const fitAddon = new FitAddon()
+        fitAddonRef.current = fitAddon
+        terminal.loadAddon(fitAddon)
+        terminal.open(terminalRef.current)
+        fitAddon.fit()
 
-        const resizeObserver = new ResizeObserver(debouncedFit);
-        resizeObserver.observe(terminalRef.current);
+        const resizeObserver = new ResizeObserver(debouncedFit)
+        resizeObserver.observe(terminalRef.current)
 
         return () => {
-          resizeObserver.disconnect();
-          // We don't dispose the terminal here on unmount
-          // as it's part of the global workspace state now.
-        };
+          resizeObserver.disconnect()
+        }
       } catch (error) {
         console.error(
           "%c[CodePanel Effect] CRITICAL FAILURE during terminal attachment:",
           "color: red; font-weight: bold;",
           error
-        );
+        )
         toast.error("终端附加失败", {
           description: "无法将终端附加到DOM，请检查浏览器控制台。",
-        });
+        })
       }
     }
-  }, [terminal, debouncedFit]);
+  }, [terminal, debouncedFit])
 
-  const activeErrors = devErrors.filter((e) => e.status === "active").slice(0, 3);
+  const activeErrors = devErrors
+    .filter((e) => e.status === "active")
+    .slice(0, 3)
 
   return (
     <div className='flex-1 flex overflow-hidden'>
@@ -156,14 +166,8 @@ export function CodePanel({
               height='100%'
               theme={okaidia}
               extensions={editorExtensions}
-              basicSetup={{
-                foldGutter: true,
-                allowMultipleSelections: true,
-                indentOnInput: true,
-                lineNumbers: true,
-                autocompletion: true,
-              }}
-              style={{ height: "100%" }}
+              basicSetup={editorBasicSetup}
+              style={editorStyle}
             />
           ) : (
             <div className='w-full h-full flex items-center justify-center text-neutral-500'>

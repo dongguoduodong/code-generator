@@ -14,10 +14,13 @@ import { findLastIndex } from "lodash-es"
 import { LoadingPlaceholder } from "./LoadingPlaceholder"
 import { Message } from "ai"
 import { UseChatHelpers } from "@ai-sdk/react"
+import { RenderNode } from "@/types/ai"
+import { useIncrementalStreamParser } from "../hooks/useIncrementalStreamParser"
 
 const ChatMessage = memo(function ChatMessage({
   message,
   isLastAssistantMessage,
+  lastMessageNodes,
   isLoading,
   isProcessingQueue,
   operationStatuses,
@@ -26,6 +29,8 @@ const ChatMessage = memo(function ChatMessage({
 }: {
   message: Message
   isLastAssistantMessage: boolean
+  lastMessageNodes: RenderNode[]
+  isPending: boolean
   isLoading: boolean
   isProcessingQueue: boolean
   operationStatuses: Record<
@@ -38,6 +43,17 @@ const ChatMessage = memo(function ChatMessage({
   const isLiveStreaming = isLoading && isLastAssistantMessage
   const isPostStreamProcessing = isLastAssistantMessage && isProcessingQueue
   const isEffectivelyLive = isLiveStreaming || isPostStreamProcessing
+
+
+  // 对于内容不变的历史消息，此 Hook 由于内部有 useRef 缓存，开销不大。
+  const parsedNodesForStaticMessage = useIncrementalStreamParser(
+    message.id,
+    message.content
+  )
+
+  const nodesForThisMessage = isLastAssistantMessage
+    ? lastMessageNodes
+    : parsedNodesForStaticMessage
 
   return (
     <div
@@ -59,14 +75,15 @@ const ChatMessage = memo(function ChatMessage({
         )}
       >
         {message.role === "assistant" ? (
-          <AssistantMessageRenderer
-            content={message.content}
-            messageId={message.id}
-            statuses={operationStatuses}
-            isLive={isEffectivelyLive}
-            onOpenFile={onOpenFile}
-            isAnimating={message.id === animatingMessageId}
-          />
+          <>
+            <AssistantMessageRenderer
+              nodes={nodesForThisMessage}
+              statuses={operationStatuses}
+              isLive={isEffectivelyLive}
+              onOpenFile={onOpenFile}
+              isAnimating={message.id === animatingMessageId}
+            />
+          </>
         ) : (
           <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
         )}
@@ -80,7 +97,6 @@ const ChatMessage = memo(function ChatMessage({
   )
 })
 
-// --- Main ChatPanel Component ---
 export default function ChatPanel({
   messages,
   input,
@@ -90,6 +106,8 @@ export default function ChatPanel({
   project,
   onOpenFile,
   animatingMessageId,
+  assistantMessageNodes,
+  isAssistantMessagePending,
 }: {
   messages: Message[]
   input: string
@@ -103,6 +121,8 @@ export default function ChatPanel({
   project: Pick<Project, "name">
   onOpenFile: (path: string) => void
   animatingMessageId: string | null
+  assistantMessageNodes: RenderNode[]
+  isAssistantMessagePending: boolean
 }) {
   const isLoading = status === "submitted" || status === "streaming"
   const isWaitingForResponse = status === "submitted"
@@ -169,7 +189,6 @@ export default function ChatPanel({
         className='flex-1 overflow-y-auto min-h-0 flex flex-col'
         ref={messagesContainerRef}
       >
-        {/* The `mt-auto` class is removed here to allow content to start from the top. */}
         <div className='p-4 space-y-6'>
           {messages.map((m, index) => (
             <ChatMessage
@@ -178,6 +197,8 @@ export default function ChatPanel({
               isLastAssistantMessage={
                 m.role === "assistant" && index === lastAssistantMessageIndex
               }
+              lastMessageNodes={assistantMessageNodes}
+              isPending={isAssistantMessagePending}
               isLoading={isLoading}
               isProcessingQueue={isProcessingQueue}
               operationStatuses={operationStatuses}

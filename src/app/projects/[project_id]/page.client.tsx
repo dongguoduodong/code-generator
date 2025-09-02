@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useChat } from "@ai-sdk/react"
 import ignore from "ignore"
 import { toast } from "sonner"
@@ -46,6 +46,8 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
   // 用于防止指令被重复执行的 ref
   const processedNodeIds = useRef(new Set<string>())
 
+  const [isPending, startTransition] = useTransition()
+  const [displayedNodes, setDisplayedNodes] = useState<RenderNode[]>([])
   const chatHook = useChat({
     api: `/api/projects/${props.project.id}/chat`,
     initialMessages: props.initialMessages,
@@ -94,11 +96,17 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     () => messages.findLast((m) => m.role === "assistant"),
     [messages]
   )
-  const structuredResponse = useIncrementalStreamParser(
+  const latestParsedNodes = useIncrementalStreamParser(
     lastAssistantMessage?.id ?? "",
     lastAssistantMessage?.content ?? ""
   )
+  const nodesJson = JSON.stringify(latestParsedNodes)
 
+  useEffect(() => {
+    startTransition(() => {
+      setDisplayedNodes(latestParsedNodes)
+    })
+  }, [nodesJson])
   const gitignoreParser = useMemo(() => {
     const ig = ignore()
     if (props.initialGitignoreContent) {
@@ -137,15 +145,12 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
   useEffect(() => {
     const isStreaming = status === "submitted" || status === "streaming"
     if (isStreaming && lastAssistantMessage) {
-      const newNodesToExecute = structuredResponse.filter(
-        (node: RenderNode) => {
-          // 只有当指令是可执行的（终端指令或已闭合的文件指令）且尚未被处理时
-          const isReadyForQueue =
-            node.type === "terminal" || (node.type === "file" && node.isClosed)
-          const isNew = !processedNodeIds.current.has(node.id)
-          return isReadyForQueue && isNew
-        }
-      )
+      const newNodesToExecute = latestParsedNodes.filter((node: RenderNode) => {
+        const isReadyForQueue =
+          node.type === "terminal" || (node.type === "file" && node.isClosed)
+        const isNew = !processedNodeIds.current.has(node.id)
+        return isReadyForQueue && isNew
+      })
 
       if (newNodesToExecute.length > 0) {
         newNodesToExecute.forEach((node) =>
@@ -155,7 +160,7 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
       }
     }
   }, [
-    structuredResponse,
+    latestParsedNodes,
     status,
     enqueueInstructions,
     project.id,
@@ -260,6 +265,8 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
         project={props.project}
         onOpenFile={handleOpenFileFromChat}
         animatingMessageId={animatingMessageId}
+        assistantMessageNodes={displayedNodes}
+        isAssistantMessagePending={isPending}
       />
       <WorkspacePanel onFixDevError={handleFixDevError} />
     </div>

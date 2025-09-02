@@ -5,9 +5,9 @@ import type { RenderNode, FileOperationType } from "@/types/ai"
 import { simpleHash } from "../utils/parse"
 
 enum ParserState {
-  SEARCHING_FOR_TAG, // 寻找标签开始
-  CAPTURING_TAG_DEFINITION, // 解析标签属性
-  CAPTURING_FILE_CONTENT, // 捕获文件内容
+  SEARCHING_FOR_TAG,
+  CAPTURING_TAG_DEFINITION,
+  CAPTURING_FILE_CONTENT,
 }
 
 interface ParserMachineState {
@@ -28,8 +28,6 @@ const parseAttributes = (tagContent: string): Record<string, string> => {
   }
   return attributes
 }
-
-const STRUCTURAL_TAG_REGEX = /<(file|terminal)\s/
 
 export function useIncrementalStreamParser(
   messageId: string,
@@ -81,16 +79,11 @@ export function useIncrementalStreamParser(
 
         if (tagStartIndex === -1) {
           const lastMdNode = getOrCreateLastMarkdownNode()
-          // [+] START: 修正拼写错误和逻辑错误
-          // 获取从当前光标到末尾的所有新内容
           const newContent = state.buffer.substring(state.cursor)
           if (newContent) {
-            // 正确地追加新内容，而不是覆盖
             lastMdNode.content += newContent
           }
-          // 将光标移动到末尾，因为所有剩余内容都已处理
           state.cursor = state.buffer.length
-          // [+] END: 修正
           break main_loop
         }
 
@@ -129,7 +122,7 @@ export function useIncrementalStreamParser(
         ) {
           const attrs = parseAttributes(tagDefinition)
           if (attrs.path && attrs.action) {
-            getOrCreateLastMarkdownNode() // 确保在文件节点前有一个markdown节点容器
+            getOrCreateLastMarkdownNode()
             const fileNode: Extract<RenderNode, { type: "file" }> = {
               id: `${messageId}-file-${attrs.action}-${attrs.path}`,
               type: "file",
@@ -149,7 +142,7 @@ export function useIncrementalStreamParser(
         ) {
           const attrs = parseAttributes(tagDefinition)
           if (attrs.command) {
-            getOrCreateLastMarkdownNode() // 确保在终端节点前有一个markdown节点容器
+            getOrCreateLastMarkdownNode()
             const terminalNode: Extract<RenderNode, { type: "terminal" }> = {
               id: `${messageId}-terminal-${simpleHash(attrs.command)}`,
               type: "terminal",
@@ -167,8 +160,14 @@ export function useIncrementalStreamParser(
             state.cursor,
             absoluteTagEndIndex
           )
-          getOrCreateLastMarkdownNode().content += unrecognizedTagText
-          state.fsmState = ParserState.SEARCHING_FOR_TAG
+
+          if (state.activeFileNode) {
+            state.activeFileNode.content += unrecognizedTagText
+            state.fsmState = ParserState.CAPTURING_FILE_CONTENT
+          } else {
+            getOrCreateLastMarkdownNode().content += unrecognizedTagText
+            state.fsmState = ParserState.SEARCHING_FOR_TAG
+          }
         }
 
         state.cursor = absoluteTagEndIndex
@@ -176,35 +175,8 @@ export function useIncrementalStreamParser(
       }
 
       case ParserState.CAPTURING_FILE_CONTENT: {
-        const endFileTagIndex = unprocessedBuffer.indexOf("</file>")
-        const nextStructuralTagMatch =
-          unprocessedBuffer.match(STRUCTURAL_TAG_REGEX)
-        const nextStructuralTagIndex = nextStructuralTagMatch?.index ?? -1
-
-        if (
-          nextStructuralTagIndex !== -1 &&
-          (endFileTagIndex === -1 || nextStructuralTagIndex < endFileTagIndex)
-        ) {
-          const contentBeforeNewTag = unprocessedBuffer.substring(
-            0,
-            nextStructuralTagIndex
-          )
-          if (state.activeFileNode && contentBeforeNewTag) {
-            state.activeFileNode.content += contentBeforeNewTag
-          }
-
-          if (state.activeFileNode) {
-            state.activeFileNode.isClosed = true
-            console.warn(
-              `[Parser] Force-closing unclosed file tag for "${state.activeFileNode.path}" due to new structural tag starting.`
-            )
-          }
-          state.activeFileNode = null
-
-          state.cursor += nextStructuralTagIndex
-          state.fsmState = ParserState.SEARCHING_FOR_TAG
-          break
-        }
+        const endFileTag = "</file>"
+        const endFileTagIndex = unprocessedBuffer.indexOf(endFileTag)
 
         if (endFileTagIndex !== -1) {
           const absoluteEndFileTagIndex = state.cursor + endFileTagIndex
@@ -221,20 +193,19 @@ export function useIncrementalStreamParser(
             state.activeFileNode = null
           }
 
-          state.cursor = absoluteEndFileTagIndex + "</file>".length
+          state.cursor = absoluteEndFileTagIndex + endFileTag.length
           state.fsmState = ParserState.SEARCHING_FOR_TAG
           break
-        }
-
-        if (state.activeFileNode) {
-          const contentChunk = state.buffer.substring(state.cursor)
-          if (contentChunk) {
-            state.activeFileNode.content += contentChunk
+        } else {
+          if (state.activeFileNode) {
+            const contentChunk = state.buffer.substring(state.cursor)
+            if (contentChunk) {
+              state.activeFileNode.content += contentChunk
+            }
+            state.cursor = state.buffer.length
           }
-          state.cursor = state.buffer.length
+          break main_loop
         }
-        // 跳出主循环，等待下一次带着新数据的渲染。
-        break main_loop
       }
     }
   }

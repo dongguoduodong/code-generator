@@ -2,32 +2,27 @@
 
 import React from "react"
 import StructuredResponse from "./StructuredResponse"
-import { OperationStatuses } from "@/types/ai"
-import { useIncrementalStreamParser } from "../hooks/useIncrementalStreamParser"
+import { OperationStatuses, RenderNode } from "@/types/ai" // 💡 引入 RenderNode 类型
 
 interface AssistantMessageRendererProps {
-  content: string
+  nodes: RenderNode[]
 
   statuses: OperationStatuses
   isLive: boolean
-  messageId: string
   onOpenFile: (path: string) => void
   isAnimating: boolean
 }
 
 const AssistantMessageRenderer = React.memo(function AssistantMessageRenderer({
-  content,
+  nodes,
   statuses,
   isLive,
-  messageId,
   onOpenFile,
   isAnimating,
 }: AssistantMessageRendererProps) {
-  const structuredResponse = useIncrementalStreamParser(messageId, content)
-
   return (
     <StructuredResponse
-      nodes={structuredResponse}
+      nodes={nodes}
       statuses={statuses}
       isLive={isLive}
       onOpenFile={onOpenFile}
