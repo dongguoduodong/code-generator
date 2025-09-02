@@ -5,9 +5,9 @@ import type { RenderNode, FileOperationType } from "@/types/ai"
 import { simpleHash } from "../utils/parse"
 
 enum ParserState {
-  SEARCHING_FOR_TAG,
-  CAPTURING_TAG_DEFINITION,
-  CAPTURING_FILE_CONTENT,
+  SEARCHING_FOR_TAG, // 寻找标签开始
+  CAPTURING_TAG_DEFINITION, // 解析标签属性
+  CAPTURING_FILE_CONTENT, // 捕获文件内容
 }
 
 interface ParserMachineState {
@@ -227,21 +227,24 @@ export function useIncrementalStreamParser(
         }
 
         if (state.activeFileNode) {
-          // 只追加新收到的内容
-          const existingContentLength = state.activeFileNode.content.length
-          const newContent = unprocessedBuffer.substring(existingContentLength)
-          if (newContent) {
-            state.activeFileNode.content += newContent
+          const contentChunk = state.buffer.substring(state.cursor)
+          if (contentChunk) {
+            state.activeFileNode.content += contentChunk
           }
           state.cursor = state.buffer.length
         }
+        // 跳出主循环，等待下一次带着新数据的渲染。
         break main_loop
       }
     }
   }
 
   const finalNodes = state.nodes.filter(
-    (node) => !(node.type === "markdown" && (node.content.trim() === "" || node.content.trim() === "/>"))
+    (node) =>
+      !(
+        node.type === "markdown" &&
+        (node.content.trim() === "" || node.content.trim() === "/>")
+      )
   )
 
   return finalNodes
