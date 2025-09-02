@@ -1,22 +1,36 @@
 "use client"
 
 import { useRef } from "react"
-import type { RenderNode, FileOperationType } from "@/types/ai"
+import type {
+  RenderNode,
+  FileOperationType,
+  FileNode,
+  TerminalNode,
+  MarkdownNode,
+} from "@/types/ai"
 import { simpleHash } from "../utils/parse"
 
-enum ParserState {
-  SEARCHING_FOR_TAG,
+// 解析器是在指令块内部还是外部
+enum TopLevelParserState {
+  OUTSIDE_ARTIFACT,
+  INSIDE_ARTIFACT,
+}
+
+enum ArtifactParserState {
+  SEARCHING_TAG,
   CAPTURING_TAG_DEFINITION,
   CAPTURING_FILE_CONTENT,
 }
 
 interface ParserMachineState {
-  fsmState: ParserState
+  topLevelState: TopLevelParserState
+  artifactState: ArtifactParserState
   nodes: RenderNode[]
-  buffer: string
-  cursor: number
+  buffer: string // 缓冲当前批次待处理的增量数据
+  cursor: number // 缓冲内的游标
   currentMessageId: string | null
-  activeFileNode: Extract<RenderNode, { type: "file" }> | null
+  activeFileNode: FileNode | null
+  rawContentProcessedLength: number // 记录已处理的原始字符串长度
 }
 
 const parseAttributes = (tagContent: string): Record<string, string> => {
@@ -40,29 +54,34 @@ export function useIncrementalStreamParser(
     messageId !== stateRef.current.currentMessageId
   ) {
     stateRef.current = {
-      fsmState: ParserState.SEARCHING_FOR_TAG,
+      topLevelState: TopLevelParserState.OUTSIDE_ARTIFACT,
+      artifactState: ArtifactParserState.SEARCHING_TAG,
       nodes: [],
       buffer: "",
       cursor: 0,
       currentMessageId: messageId,
       activeFileNode: null,
+      rawContentProcessedLength: 0,
     }
   }
 
   const state = stateRef.current
-  state.buffer = rawContent
+  const newChunk = rawContent.substring(state.rawContentProcessedLength)
+  if (!newChunk) {
+    return [...state.nodes]
+  }
 
-  const getOrCreateLastMarkdownNode = (): Extract<
-    RenderNode,
-    { type: "markdown" }
-  > => {
+  // 将新块追加到内部 buffer
+  state.buffer += newChunk
+
+  const getOrCreateLastMarkdownNode = (): MarkdownNode => {
     const lastNode =
       state.nodes.length > 0 ? state.nodes[state.nodes.length - 1] : null
-    if (lastNode && lastNode.type === "markdown") {
+    if (lastNode?.type === "markdown") {
       return lastNode
     }
-    const newMdNode: Extract<RenderNode, { type: "markdown" }> = {
-      id: `${messageId}-md-${state.nodes.length}`,
+    const newMdNode: MarkdownNode = {
+      id: `${messageId}-md-${state.nodes.length}-${Date.now()}`,
       type: "markdown",
       content: "",
     }
@@ -71,152 +90,190 @@ export function useIncrementalStreamParser(
   }
 
   main_loop: while (state.cursor < state.buffer.length) {
-    const unprocessedBuffer = state.buffer.substring(state.cursor)
+    const remainingBuffer = state.buffer.substring(state.cursor)
 
-    switch (state.fsmState) {
-      case ParserState.SEARCHING_FOR_TAG: {
-        const tagStartIndex = unprocessedBuffer.indexOf("<")
+    switch (state.topLevelState) {
+      case TopLevelParserState.OUTSIDE_ARTIFACT: {
+        const artifactStartIndex = remainingBuffer.indexOf("<code_artifact")
 
-        if (tagStartIndex === -1) {
-          const lastMdNode = getOrCreateLastMarkdownNode()
-          const newContent = state.buffer.substring(state.cursor)
-          if (newContent) {
-            lastMdNode.content += newContent
-          }
+        if (artifactStartIndex === -1) {
+          getOrCreateLastMarkdownNode().content += remainingBuffer
           state.cursor = state.buffer.length
           break main_loop
         }
 
-        const absoluteTagStartIndex = state.cursor + tagStartIndex
-        const markdownContent = state.buffer.substring(
-          state.cursor,
-          absoluteTagStartIndex
+        const markdownContentBeforeArtifact = remainingBuffer.substring(
+          0,
+          artifactStartIndex
         )
-
-        if (markdownContent) {
-          getOrCreateLastMarkdownNode().content += markdownContent
+        if (markdownContentBeforeArtifact) {
+          getOrCreateLastMarkdownNode().content += markdownContentBeforeArtifact
         }
 
-        state.cursor = absoluteTagStartIndex
-        state.fsmState = ParserState.CAPTURING_TAG_DEFINITION
-        break
-      }
-
-      case ParserState.CAPTURING_TAG_DEFINITION: {
-        const tagEndIndex = unprocessedBuffer.indexOf(">")
-
+        const tagEndIndex = remainingBuffer.indexOf(">", artifactStartIndex)
         if (tagEndIndex === -1) {
+          // 标签不完整，将光标移动到标签头，以便保留它等待下一个数据块
+          state.cursor += artifactStartIndex
           break main_loop
         }
 
-        const absoluteTagEndIndex = state.cursor + tagEndIndex + 1
-        const tagDefinition = state.buffer
-          .substring(state.cursor + 1, absoluteTagEndIndex - 1)
-          .trim()
-
-        let tagProcessed = false
-
-        if (
-          tagDefinition.startsWith("file") &&
-          !tagDefinition.startsWith("/file")
-        ) {
-          const attrs = parseAttributes(tagDefinition)
-          if (attrs.path && attrs.action) {
-            getOrCreateLastMarkdownNode()
-            const fileNode: Extract<RenderNode, { type: "file" }> = {
-              id: `${messageId}-file-${attrs.action}-${attrs.path}`,
-              type: "file",
-              path: attrs.path,
-              action: attrs.action as FileOperationType,
-              content: "",
-              isClosed: false,
-            }
-            state.nodes.push(fileNode)
-            state.activeFileNode = fileNode
-            state.fsmState = ParserState.CAPTURING_FILE_CONTENT
-            tagProcessed = true
-          }
-        } else if (
-          tagDefinition.startsWith("terminal") &&
-          tagDefinition.trim().endsWith("/")
-        ) {
-          const attrs = parseAttributes(tagDefinition)
-          if (attrs.command) {
-            getOrCreateLastMarkdownNode()
-            const terminalNode: Extract<RenderNode, { type: "terminal" }> = {
-              id: `${messageId}-terminal-${simpleHash(attrs.command)}`,
-              type: "terminal",
-              command: attrs.command,
-              background: attrs.bg === "true",
-            }
-            state.nodes.push(terminalNode)
-            state.fsmState = ParserState.SEARCHING_FOR_TAG
-            tagProcessed = true
-          }
-        }
-
-        if (!tagProcessed) {
-          const unrecognizedTagText = state.buffer.substring(
-            state.cursor,
-            absoluteTagEndIndex
-          )
-
-          if (state.activeFileNode) {
-            state.activeFileNode.content += unrecognizedTagText
-            state.fsmState = ParserState.CAPTURING_FILE_CONTENT
-          } else {
-            getOrCreateLastMarkdownNode().content += unrecognizedTagText
-            state.fsmState = ParserState.SEARCHING_FOR_TAG
-          }
-        }
-
-        state.cursor = absoluteTagEndIndex
-        break
+        state.cursor += tagEndIndex + 1
+        state.topLevelState = TopLevelParserState.INSIDE_ARTIFACT
+        state.artifactState = ArtifactParserState.SEARCHING_TAG
+        continue main_loop // 强制用新状态开始下一次迭代
       }
 
-      case ParserState.CAPTURING_FILE_CONTENT: {
-        const endFileTag = "</file>"
-        const endFileTagIndex = unprocessedBuffer.indexOf(endFileTag)
+      case TopLevelParserState.INSIDE_ARTIFACT: {
+        switch (state.artifactState) {
+          case ArtifactParserState.SEARCHING_TAG: {
+            const artifactEndIndex = remainingBuffer.indexOf("</code_artifact>")
+            const nextSubTagStartIndex = remainingBuffer.indexOf("<")
 
-        if (endFileTagIndex !== -1) {
-          const absoluteEndFileTagIndex = state.cursor + endFileTagIndex
-          const finalContentChunk = state.buffer.substring(
-            state.cursor,
-            absoluteEndFileTagIndex
-          )
+            if (
+              artifactEndIndex !== -1 &&
+              (nextSubTagStartIndex === -1 ||
+                artifactEndIndex < nextSubTagStartIndex)
+            ) {
+              if (state.activeFileNode) {
+                const finalContentChunk = remainingBuffer.substring(
+                  0,
+                  artifactEndIndex
+                )
+                state.activeFileNode.content += finalContentChunk
+                state.activeFileNode.isClosed = true
+                state.activeFileNode = null
+              }
+              state.cursor += artifactEndIndex + "</code_artifact>".length
+              state.topLevelState = TopLevelParserState.OUTSIDE_ARTIFACT
+              continue main_loop // 强制用新状态开始下一次迭代
+            }
 
-          if (state.activeFileNode) {
-            if (finalContentChunk) {
+            const tagStartIndex = remainingBuffer.indexOf("<")
+            if (tagStartIndex === -1) {
+              // 在 artifact 内部但找不到新标签，说明可能在文件内容中间，等待更多数据
+              break main_loop
+            }
+
+            // 跳过标签之间的空白字符
+            state.cursor += tagStartIndex
+            state.artifactState = ArtifactParserState.CAPTURING_TAG_DEFINITION
+            continue main_loop // 强制用新状态开始下一次迭代
+          }
+
+          case ArtifactParserState.CAPTURING_TAG_DEFINITION: {
+            const tagEndIndex = remainingBuffer.indexOf(">")
+            if (tagEndIndex === -1) {
+              // 标签不完整，不移动cursor，等待更多数据
+              break main_loop
+            }
+
+            const absoluteTagEndIndex = state.cursor + tagEndIndex + 1
+            const tagDefinition = state.buffer
+              .substring(state.cursor + 1, absoluteTagEndIndex - 1)
+              .trim()
+
+            if (
+              tagDefinition.startsWith("file") &&
+              !tagDefinition.startsWith("/file")
+            ) {
+              const attrs = parseAttributes(tagDefinition)
+              if (attrs.path && attrs.action) {
+                const fileNode: FileNode = {
+                  id: `${messageId}-file-${simpleHash(attrs.path)}-${
+                    state.nodes.length
+                  }`,
+                  type: "file",
+                  path: attrs.path,
+                  action: attrs.action as FileOperationType,
+                  content: "",
+                  isClosed: false,
+                }
+                state.nodes.push(fileNode)
+                state.activeFileNode = fileNode
+                state.artifactState = ArtifactParserState.CAPTURING_FILE_CONTENT
+              } else {
+                state.artifactState = ArtifactParserState.SEARCHING_TAG
+              }
+            } else if (
+              tagDefinition.startsWith("terminal") &&
+              tagDefinition.endsWith("/")
+            ) {
+              const attrs = parseAttributes(tagDefinition)
+              if (attrs.command) {
+                const terminalNode: TerminalNode = {
+                  id: `${messageId}-terminal-${simpleHash(attrs.command)}-${
+                    state.nodes.length
+                  }`,
+                  type: "terminal",
+                  command: attrs.command,
+                  background: attrs.bg === "true",
+                }
+                state.nodes.push(terminalNode)
+                state.artifactState = ArtifactParserState.SEARCHING_TAG
+              } else {
+                state.artifactState = ArtifactParserState.SEARCHING_TAG
+              }
+            } else {
+              state.artifactState = ArtifactParserState.SEARCHING_TAG
+            }
+            state.cursor = absoluteTagEndIndex
+            continue main_loop // 强制用新状态开始下一次迭代
+          }
+
+          case ArtifactParserState.CAPTURING_FILE_CONTENT: {
+            if (!state.activeFileNode) {
+              state.artifactState = ArtifactParserState.SEARCHING_TAG
+              continue main_loop
+            }
+
+            const endFileTag = "</file>"
+            const endFileTagIndex = remainingBuffer.indexOf(endFileTag)
+
+            if (endFileTagIndex !== -1) {
+              const absoluteEndFileTagIndex = state.cursor + endFileTagIndex
+              const finalContentChunk = state.buffer.substring(
+                state.cursor,
+                absoluteEndFileTagIndex
+              )
               state.activeFileNode.content += finalContentChunk
-            }
-            state.activeFileNode.isClosed = true
-            state.activeFileNode = null
-          }
+              state.activeFileNode.isClosed = true
+              state.activeFileNode = null
 
-          state.cursor = absoluteEndFileTagIndex + endFileTag.length
-          state.fsmState = ParserState.SEARCHING_FOR_TAG
-          break
-        } else {
-          if (state.activeFileNode) {
-            const contentChunk = state.buffer.substring(state.cursor)
-            if (contentChunk) {
-              state.activeFileNode.content += contentChunk
+              state.cursor = absoluteEndFileTagIndex + endFileTag.length
+              state.artifactState = ArtifactParserState.SEARCHING_TAG
+              continue main_loop
+            } else {
+              // 未找到完整结束标签，将所有内容都当作文件内容，但需检查并保留可能的、不完整的结束标签
+              let contentToAdd = remainingBuffer
+
+              for (let i = endFileTag.length - 1; i > 0; i--) {
+                const partialTag = endFileTag.substring(0, i)
+                if (remainingBuffer.endsWith(partialTag)) {
+                  contentToAdd = remainingBuffer.substring(
+                    0,
+                    remainingBuffer.length - partialTag.length
+                  )
+                  break
+                }
+              }
+
+              state.activeFileNode.content += contentToAdd
+              state.cursor += contentToAdd.length
+              break main_loop
             }
-            state.cursor = state.buffer.length
           }
-          break main_loop
         }
+        break
       }
     }
   }
 
-  const finalNodes = state.nodes.filter(
-    (node) =>
-      !(
-        node.type === "markdown" &&
-        (node.content.trim() === "" || node.content.trim() === "/>")
-      )
-  )
+  // 清理 buffer，只保留已处理数据之后的部分
+  state.buffer = state.buffer.substring(state.cursor)
+  // 因为 buffer 的开头已经是未处理部分，所以 cursor 重置为 0
+  state.cursor = 0
+  // 更新已处理的总长度
+  state.rawContentProcessedLength = rawContent.length
 
-  return finalNodes
+  return [...state.nodes]
 }

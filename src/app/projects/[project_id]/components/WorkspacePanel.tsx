@@ -17,9 +17,7 @@ export default function WorkspacePanel({
 }: {
   onFixDevError: (errorLog: string) => void
 }) {
-  const isLoadingContainer = useWorkspaceStore(
-    (state) => state.isLoadingContainer
-  )
+  const webcontainer = useWorkspaceStore((state) => state.webcontainer)
   const previewUrl = useWorkspaceStore((state) => state.previewUrl)
   const activeTab = useWorkspaceStore((state) => state.activeWorkspaceTab)
   const setActiveTab = useWorkspaceStore(
@@ -55,7 +53,7 @@ export default function WorkspacePanel({
             "data-[state=inactive]:hidden"
           )}
         >
-          {isLoadingContainer ? (
+          {!webcontainer ? (
             <div className='flex-1 flex items-center justify-center text-center p-4'>
               <div>
                 <HardDrive
@@ -82,10 +80,7 @@ export default function WorkspacePanel({
             "data-[state=inactive]:hidden"
           )}
         >
-          <PreviewPanel
-            previewUrl={previewUrl}
-            isLoading={isLoadingContainer}
-          />
+          <PreviewPanel previewUrl={previewUrl} isLoading={!webcontainer} />
         </TabsContent>
       </Tabs>
     </main>

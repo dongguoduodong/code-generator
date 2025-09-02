@@ -12,25 +12,23 @@ import {
 import { useWebContainer } from "./useWebContainer"
 import { convertInitialFilesToFileSystem } from "../utils/fileSystem"
 import { type ProjectClientPageProps } from "@/types/ui"
+import { WorkspaceService } from "@/services/WorkspaceService"
 
 interface UseProjectSetupProps {
   props: ProjectClientPageProps
   chatHook: UseChatHelpers
+  workspaceService: WorkspaceService
 }
 
-/**
- * 负责在项目页面加载时进行所有必要的异步设置。
- * - 初始化 WebContainer 和 Terminal。
- * - 对于新项目，触发初始的 AI 对话。
- * - 将数据库中的文件“水合”到 WebContainer 的虚拟文件系统中。
- * - 自动执行项目的启动脚本 (setup.sh)。
- */
-export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
+export function useProjectSetup({
+  props,
+  chatHook,
+  workspaceService,
+}: UseProjectSetupProps) {
   const { initialFiles, isFirstLoad, project } = props
 
   const actions = useWorkspaceStore((state) => state.actions)
   const initialAiCallFiredRef = useRef(false)
-  const setupFlowHasRun = useRef(false)
 
   const storeApi = useWorkspaceStoreApi()
   const { initWebContainer, writeFile } = useWebContainer(project.id)
@@ -53,7 +51,6 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
       }
 
       const webcontainerInstance = await initWebContainer()
-
       if (webcontainerInstance) {
         const { Terminal } = await import("xterm")
         const term = new Terminal({
@@ -77,13 +74,13 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
 
   const webcontainer = useWorkspaceStore((state) => state.webcontainer)
   const terminal = useWorkspaceStore((state) => state.terminal)
-  const hasHydrated = useRef(false)
+  const hasHydratedAndLaunchedShell = useRef(false)
 
   useEffect(() => {
-    // 确保这个 effect 只在 webcontainer 和 terminal 都存在且尚未水合时运行
-    if (!webcontainer || !terminal || hasHydrated.current) return
-    hasHydrated.current = true
-
+    if (!webcontainer || !terminal || hasHydratedAndLaunchedShell.current)
+      return
+    hasHydratedAndLaunchedShell.current = true
+    workspaceService.setDependencies(webcontainer, terminal)
     const hydrateAndSetup = async () => {
       if (initialFiles.length > 0) {
         actions.setAiStatus("正在同步初始文件...")
@@ -93,7 +90,6 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
       const fileTree = convertInitialFilesToFileSystem(initialFiles)
       actions.setFileSystem(fileTree)
 
-      // 将文件并行写入 WebContainer 的虚拟文件系统
       if (initialFiles.length > 0) {
         await Promise.all(
           initialFiles.map((file) => writeFile(file.path, file.content))
@@ -106,23 +102,38 @@ export function useProjectSetup({ props, chatHook }: UseProjectSetupProps) {
         }
       }
 
-      if (!setupFlowHasRun.current) {
-        setupFlowHasRun.current = true
-        const setupShExists = initialFiles.some((f) => f.path === "setup.sh")
+      await workspaceService.launchInteractiveShell()
 
-        if (setupShExists) {
-          // 如果存在 setup.sh，则作为后台任务执行
-          actions.setAiStatus("检测到 setup.sh，正在作为后台任务执行...")
-          toast.info("正在执行启动脚本 setup.sh...")
-          actions.runBackgroundTask("sh", ["setup.sh"])
-          actions.setAiStatus("启动脚本正在后台运行。终端将显示其日志。")
-        } else {
-          // 如果没有，则启动一个交互式 shell
-          actions.startInteractiveShell()
-        }
+      const setupShExists = initialFiles.some((f) => f.path === "setup.sh")
+
+      if (setupShExists) {
+        actions.setAiStatus("检测到 setup.sh，正在作为后台任务执行...")
+        toast.info("正在执行启动脚本 setup.sh...")
+
+        workspaceService.enqueueInstructions(
+          [
+            {
+              id: `setup-sh-${Date.now()}`,
+              type: "terminal",
+              command: "sh setup.sh",
+              background: true,
+            },
+          ],
+          project.id
+        )
+
+        actions.setAiStatus("启动脚本正在后台运行。终端将显示其日志。")
       }
     }
 
     hydrateAndSetup()
-  }, [webcontainer, terminal, initialFiles, writeFile, actions])
+  }, [
+    webcontainer,
+    terminal,
+    initialFiles,
+    writeFile,
+    actions,
+    workspaceService,
+    project.id,
+  ])
 }

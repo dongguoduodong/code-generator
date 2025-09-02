@@ -339,15 +339,20 @@ export async function executeAgenticWorkflow(
       )
     }
   } else if (decision.decision === "PLAN") {
+    const { conversationHistory, fileContext } = context
+    const finalPlannerPrompt = PLANNER_PROMPT.replace(
+      "{conversation_history}",
+      conversationHistory
+    ).replace("{file_system_snapshot}", fileContext)
     streamResult = await createAiStream(
       context,
       customOpenai("gemini-2.5-pro"),
-      PLANNER_PROMPT,
+      finalPlannerPrompt,
       decision.next_prompt_input
     )
   } else {
     const plan = decision.next_prompt_input
-
+    const { conversationHistory, fileContext } = context
     // 从 ChatContext 中获取文件快照 (所有文件的列表)
     const fileListSnapshot = context.fileContext.startsWith(
       "File system snapshot:\n"
@@ -364,11 +369,13 @@ export async function executeAgenticWorkflow(
       context
     )
 
-    // 将上下文注入到 CODER_PROMPT 中
     const finalSystemPrompt = CODER_PROMPT.replace(
       "{relevant_file_content}",
       modificationContext
     )
+      .replace("{conversation_history}", conversationHistory)
+      .replace("{file_system_snapshot}", fileContext)
+
     streamResult = await createAiStream(
       context,
       customOpenai("gemini-2.5-pro"),

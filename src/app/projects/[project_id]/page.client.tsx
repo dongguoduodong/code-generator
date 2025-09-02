@@ -5,6 +5,7 @@ import { useChat } from "@ai-sdk/react"
 import ignore from "ignore"
 import { toast } from "sonner"
 import { useMemoizedFn } from "ahooks"
+import { ChatRequestOptions } from "ai"
 
 import { type ProjectClientPageProps } from "@/types/ui"
 import { type RenderNode } from "@/types/ai"
@@ -17,37 +18,39 @@ import {
   useWorkspaceStore,
   useWorkspaceStoreApi,
 } from "@/stores/WorkspaceStoreProvider"
-import { ChatRequestOptions } from "ai"
+import { WorkspaceService } from "@/services/WorkspaceService"
 
-/**
- * 项目工作区的核心客户端组件。
- * 负责协调 AI 聊天、WebContainer 环境、文件系统和 UI 组件之间的所有交互。
- */
 export default function ProjectClientPage(props: ProjectClientPageProps) {
   const { project } = props
 
-  const actions = useWorkspaceStore((state) => state.actions)
-  const executionError = useWorkspaceStore((state) => state.executionError)
-  const webcontainer = useWorkspaceStore((state) => state.webcontainer)
   const storeApi = useWorkspaceStoreApi()
+  const { actions, executionError, webcontainer } = useWorkspaceStore(
+    (state) => ({
+      actions: state.actions,
+      executionError: state.executionError,
+      webcontainer: state.webcontainer,
+      terminal: state.terminal,
+    })
+  )
   const {
-    enqueueInstructions,
     setGitignoreParser,
     setExecutionError,
     setAiStatus,
     setPerformanceMetrics,
   } = actions
 
+  const [workspaceService] = useState(() => new WorkspaceService(storeApi))
+
   const requestStartTime = useRef<number>(0)
-  // 用于追踪当前正在进行流式动画的消息ID
   const [animatingMessageId, setAnimatingMessageId] = useState<string | null>(
     null
   )
-  // 用于防止指令被重复执行的 ref
-  const processedNodeIds = useRef(new Set<string>())
+
+  const processedNodeIds = useRef(new Map<string, Set<string>>())
 
   const [isPending, startTransition] = useTransition()
   const [displayedNodes, setDisplayedNodes] = useState<RenderNode[]>([])
+
   const chatHook = useChat({
     api: `/api/projects/${props.project.id}/chat`,
     initialMessages: props.initialMessages,
@@ -76,11 +79,9 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
         preJudgmentTime: prejudgmentTime ? parseFloat(prejudgmentTime) : null,
       })
     },
-    // 在响应结束时，计算完整的响应时间
     onFinish: () => {
       const fullResponseTime = performance.now() - requestStartTime.current
       setPerformanceMetrics({ fullResponseTime })
-      setAiStatus("AI 任务完成，等待您的下一步指令。")
     },
     onError: (err) => {
       toast.error("AI 对话时发生错误", { description: err.message })
@@ -90,7 +91,7 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
 
   const { messages, status } = chatHook
 
-  useProjectSetup({ props, chatHook })
+  useProjectSetup({ props, chatHook, workspaceService })
 
   const lastAssistantMessage = useMemo(
     () => messages.findLast((m) => m.role === "assistant"),
@@ -100,13 +101,18 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     lastAssistantMessage?.id ?? "",
     lastAssistantMessage?.content ?? ""
   )
-  const nodesJson = JSON.stringify(latestParsedNodes)
+  const nodesJson = useMemo(
+    () => JSON.stringify(latestParsedNodes),
+    [latestParsedNodes]
+  )
+  console.log("latestParsedNodes", latestParsedNodes)
 
   useEffect(() => {
     startTransition(() => {
       setDisplayedNodes(latestParsedNodes)
     })
   }, [nodesJson])
+
   const gitignoreParser = useMemo(() => {
     const ig = ignore()
     if (props.initialGitignoreContent) {
@@ -126,9 +132,9 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
         role: "user",
         content: `[SYSTEM_ERROR] An error occurred while executing the previous instructions. Please analyze the error and create a new plan to fix it.\n\nError details:\n${executionError}`,
       })
-      setExecutionError(null) // 清除错误状态
+      setExecutionError(null)
     }
-  }, [executionError, chatHook.append, setExecutionError])
+  }, [executionError, chatHook, setExecutionError])
 
   useEffect(() => {
     const isStreaming = status === "submitted" || status === "streaming"
@@ -141,49 +147,62 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     }
   }, [messages, status])
 
-  // 当解析出新的可执行指令时，将其加入执行队列
   useEffect(() => {
     const isStreaming = status === "submitted" || status === "streaming"
-    if (isStreaming && lastAssistantMessage) {
+    if (isStreaming && lastAssistantMessage?.id) {
+      const currentMessageId = lastAssistantMessage.id
+
+      // 为当前消息获取或创建一个专用的 Set
+      if (!processedNodeIds.current.has(currentMessageId)) {
+        processedNodeIds.current.set(currentMessageId, new Set<string>())
+      }
+      const currentMessageProcessedSet =
+        processedNodeIds.current.get(currentMessageId)!
+
       const newNodesToExecute = latestParsedNodes.filter((node: RenderNode) => {
         const isReadyForQueue =
           node.type === "terminal" || (node.type === "file" && node.isClosed)
-        const isNew = !processedNodeIds.current.has(node.id)
+        // 检查是否在该消息专属的 Set 中已存在
+        const isNew = !currentMessageProcessedSet.has(node.id)
         return isReadyForQueue && isNew
       })
 
       if (newNodesToExecute.length > 0) {
         newNodesToExecute.forEach((node) =>
-          processedNodeIds.current.add(node.id)
+          // 将新执行的 node ID 添加到该消息专属的 Set 中
+          currentMessageProcessedSet.add(node.id)
         )
-        enqueueInstructions(newNodesToExecute, project.id)
+        workspaceService.enqueueInstructions(newNodesToExecute, project.id)
       }
     }
   }, [
     latestParsedNodes,
     status,
-    enqueueInstructions,
+    workspaceService,
     project.id,
     lastAssistantMessage,
   ])
 
-  // 在组件卸载时执行清理操作
   useEffect(() => {
-    return () => {
-      // 获取最新的 store actions 和 webcontainer 实例
+    const handleBeforeUnload = () => {
       const { resetWorkspace } = storeApi.getState().actions
       const wc = storeApi.getState().webcontainer
       if (wc) {
-        console.log("正在卸载组件并销毁 WebContainer 实例...")
+        console.log("页面即将卸载，销毁 WebContainer 实例...")
         resetWorkspace()
       }
     }
-  }, [storeApi])
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [storeApi]) // 依赖 storeApi 确保函数引用稳定
 
   const handleFormSubmit = useMemoizedFn(
     async (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault()
-      processedNodeIds.current.clear()
       setAiStatus("AI 正在思考中...")
       const trimmedInput = chatHook.input.trim()
 
@@ -199,7 +218,6 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
         return
       }
 
-      // 在发送请求前，获取当前文件系统的快照
       const snapshot = await filterAndSnapshotFileSystem(
         webcontainer,
         gitignoreParser
@@ -215,7 +233,6 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     }
   )
 
-  // 处理来自 CodePanel 的开发服务器错误
   const handleFixDevError = useMemoizedFn(async (errorLog: string) => {
     if (!webcontainer) {
       toast.error("无法提交修复请求：环境尚未完全就绪。")
@@ -235,7 +252,6 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     )
   })
 
-  // 处理从聊天气泡中点击文件路径的事件
   const handleOpenFileFromChat = useMemoizedFn(async (path: string) => {
     const { webcontainer: wc, actions: storeActions } = storeApi.getState()
     if (!wc) {
@@ -245,7 +261,7 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     try {
       const content = await wc.fs.readFile(path, "utf-8")
       storeActions.setActiveFile(path, content)
-      storeActions.setActiveWorkspaceTab("code") // 切换到代码视图
+      storeActions.setActiveWorkspaceTab("code")
     } catch (error) {
       console.error(`从聊天中打开文件 ${path} 失败:`, error)
       toast.error("打开文件失败", {

@@ -128,7 +128,6 @@ export default function StructuredResponse({
             )
 
           case "file":
-            // --- FIX START: Safely handle potentially undefined action ---
             const isDelete = node.action === "delete"
             const displayAction = node.action
               ? FileOperationTypeText[node.action]
