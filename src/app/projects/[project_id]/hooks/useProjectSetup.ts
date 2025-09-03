@@ -82,6 +82,7 @@ export function useProjectSetup({
     hasHydratedAndLaunchedShell.current = true
     workspaceService.setDependencies(webcontainer, terminal)
     const hydrateAndSetup = async () => {
+      console.log('来了')
       if (initialFiles.length > 0) {
         actions.setAiStatus("正在同步初始文件...")
         toast.info("正在将项目文件加载到虚拟环境中...")
@@ -89,6 +90,7 @@ export function useProjectSetup({
 
       const fileTree = convertInitialFilesToFileSystem(initialFiles)
       actions.setFileSystem(fileTree)
+      await workspaceService.launchInteractiveShell()
 
       if (initialFiles.length > 0) {
         await Promise.all(
@@ -101,8 +103,6 @@ export function useProjectSetup({
           actions.setActiveFile(firstFile.path, firstFile.content)
         }
       }
-
-      await workspaceService.launchInteractiveShell()
 
       const setupShExists = initialFiles.some((f) => f.path === "setup.sh")
 

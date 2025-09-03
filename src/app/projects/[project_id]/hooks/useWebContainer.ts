@@ -204,15 +204,17 @@ export function useWebContainer(projectId: string) {
     toast.loading("正在启动云端开发环境...", { id: "wc-boot" })
 
     try {
+      console.log("加载")
       bootPromise = WebContainer.boot()
-      const wc = await bootPromise
 
+      const wc = await bootPromise
+      console.log("wc", wc)
       if (!wc) throw new Error("WebContainer boot failed silently.")
 
       setWebcontainer(wc, projectId)
 
       wc.on("server-ready", (port, url) => {
-        console.log('url', url)
+        console.log("url", url)
         setPreviewUrl(`${url}?t=${Date.now()}`)
         toast.success("预览服务器已就绪！")
       })

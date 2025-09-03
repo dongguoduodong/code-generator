@@ -105,7 +105,6 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     () => JSON.stringify(latestParsedNodes),
     [latestParsedNodes]
   )
-  console.log("latestParsedNodes", latestParsedNodes)
 
   useEffect(() => {
     startTransition(() => {
@@ -187,22 +186,16 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
     lastAssistantMessage,
   ])
 
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      const { resetWorkspace } = storeApi.getState().actions
-      const wc = storeApi.getState().webcontainer
-      if (wc) {
-        console.log("页面即将卸载，销毁 WebContainer 实例...")
-        resetWorkspace()
-      }
+useEffect(() => {
+  return () => {
+    const { resetWorkspace } = storeApi.getState().actions
+    const wc = storeApi.getState().webcontainer
+    if (wc) {
+      console.log("ProjectClientPage 卸载，执行清理并销毁 WebContainer 实例...")
+      resetWorkspace()
     }
-
-    window.addEventListener("beforeunload", handleBeforeUnload)
-
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload)
-    }
-  }, [storeApi]) // 依赖 storeApi 确保函数引用稳定
+  }
+}, [storeApi])
 
   const handleFormSubmit = useMemoizedFn(
     async (e: React.FormEvent<HTMLFormElement>) => {
