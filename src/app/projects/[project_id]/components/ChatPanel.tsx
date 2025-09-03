@@ -206,7 +206,7 @@ export default function ChatPanel({
               animatingMessageId={animatingMessageId}
             />
           ))}
-          {(isWaitingForResponse || assistantMessageNodes.length === 0) && (
+          {isWaitingForResponse && (
             <LoadingPlaceholder />
           )}
         </div>
