@@ -149,7 +149,11 @@ export default function ProjectClientPage(props: ProjectClientPageProps) {
 
   useEffect(() => {
     const isStreaming = status === "submitted" || status === "streaming"
-    if (isStreaming && lastAssistantMessage?.id) {
+    if (
+      isStreaming &&
+      lastAssistantMessage?.id &&
+      lastAssistantMessage?.role === "assistant"
+    ) {
       const currentMessageId = lastAssistantMessage.id
 
       // 为当前消息获取或创建一个专用的 Set
